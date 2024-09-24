@@ -1,0 +1,21 @@
+# Identify app directory
+# This is the directory where the app is located
+# every app directory should have a file called __manifest__.py
+# this file contains metadata about the app
+# the app directory is the directory that contains this file
+# app directory may be have multi version i will know it through key version in __manifest__.py
+# so i will get all versions of app directory
+def get_app_directories():
+    app_directories = []
+    for root, dirs, files in os.walk(apps_path):
+        if '__manifest__.py' in files:
+            app_directories.append(root)
+    return app_directories
+# check version for app directory in manifest file
+def get_app_version(app_directory):
+    manifest_file = os.path.join(app_directory, '__manifest__.py')
+    with open(manifest_file, 'r') as f:
+        manifest = f.read()
+    version = re.search(r"version\s*=\s*['\"]([^'\"]+)['\"]", manifest).group(1)
+    return version
+# make folders with version from 1.0,5.0,6.0 to 17.0

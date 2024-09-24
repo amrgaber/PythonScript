@@ -1,0 +1,678 @@
+Addon: acs_hms_recurring_procedure
+
+Manifest: __manifest__.py
+Content:
+```python
+# -*- coding: utf-8 -*-
+#╔══════════════════════════════════════════════════════════════════════╗
+#║                                                                      ║
+#║                  ╔═══╦╗       ╔╗  ╔╗     ╔═══╦═══╗                   ║
+#║                  ║╔═╗║║       ║║ ╔╝╚╗    ║╔═╗║╔═╗║                   ║
+#║                  ║║ ║║║╔╗╔╦╦══╣╚═╬╗╔╬╗ ╔╗║║ ╚╣╚══╗                   ║
+#║                  ║╚═╝║║║╚╝╠╣╔╗║╔╗║║║║║ ║║║║ ╔╬══╗║                   ║
+#║                  ║╔═╗║╚╣║║║║╚╝║║║║║╚╣╚═╝║║╚═╝║╚═╝║                   ║
+#║                  ╚╝ ╚╩═╩╩╩╩╩═╗╠╝╚╝╚═╩═╗╔╝╚═══╩═══╝                   ║
+#║                            ╔═╝║     ╔═╝║                             ║
+#║                            ╚══╝     ╚══╝                             ║
+#║                  SOFTWARE DEVELOPED AND SUPPORTED BY                 ║
+#║                ALMIGHTY CONSULTING SOLUTIONS PVT. LTD.               ║
+#║                      COPYRIGHT (C) 2016 - TODAY                      ║
+#║                      https://www.almightycs.com                      ║
+#║                                                                      ║
+#╚══════════════════════════════════════════════════════════════════════╝
+{
+    'name': 'Recurring Procedure (Hospital Management System)',
+    'summary': 'manage Patients Recurring Procedure (Hospital Management System)',
+    'description': """
+        Recurring Procedure (Hospital Management System). ACS HMS medical
+    """,
+    'category': 'Medical',
+    'version': '1.0.1',
+    'author': 'Almighty Consulting Solutions Pvt. Ltd.',
+    'website': 'https://www.almightycs.com',
+    'license': 'OPL-1',
+    'depends': ['acs_hms'],
+    'data': [
+        'security/ir.model.access.csv',
+        'security/security.xml',
+        'data/data.xml',
+        'views/procedure_view.xml'
+    ],
+    'images': [
+        'static/description/hms_procedure_acs_almightycs_odoo_cover.jpg',
+    ],
+    'installable': True,
+    'application': True,
+    'sequence': 3,
+    'price': 60,
+    'currency': 'USD',
+}
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+__init__.py:
+Content:
+```python
+# -*- coding: utf-8 -*-
+
+from . import models
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+Models:
+  File: models/__init__.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from . import procedure_recurrence
+from . import procedure
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: models/procedure.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from odoo import api, fields, models ,_
+from odoo.exceptions import UserError
+from datetime import date, datetime, timedelta
+
+class ProductTemplate(models.Model):
+    _inherit = 'product.template'
+
+    recurring_procedure = fields.Boolean(string="Recurrent")
+
+
+class ProcedureGroupLine(models.Model):
+    _inherit = 'procedure.group.line'
+
+    recurring_procedure = fields.Boolean(string="Recurrent")
+
+    @api.onchange('product_id')
+    def onchange_product(self):
+        if self.product_id:
+            self.recurring_procedure = self.product_id.recurring_procedure
+
+
+class HmsTreatment(models.Model):
+    _inherit = 'hms.treatment'
+
+    def get_line_data(self, line):
+        res = super(HmsTreatment, self).get_line_data(line)
+        res['recurring_procedure'] = line.recurring_procedure
+        return res
+
+
+#ACS: we can use procedure insted of procedure to optimize code also.
+class AcsPatientProcedure(models.Model):
+    _inherit = 'acs.patient.procedure'
+
+    # recurrence fields Taken reference from procedure recurrence
+    recurring_procedure = fields.Boolean(string="Recurrent")
+    recurring_count = fields.Integer(string="Tasks in Recurrence", compute='_compute_recurring_count')
+    recurrence_id = fields.Many2one('acs.procedure.recurrence', copy=False)
+    repeat_interval = fields.Integer(string='Repeat Every', default=1, compute='_compute_repeat', readonly=False)
+    repeat_unit = fields.Selection([
+        ('day', 'Days'),
+        ('week', 'Weeks'),
+        ('month', 'Months'),
+        ('year', 'Years'),
+    ], default='week', compute='_compute_repeat', readonly=False)
+    repeat_type = fields.Selection([
+        ('forever', 'Forever'),
+        ('until', 'Until'),
+    ], default="forever", string="Until", compute='_compute_repeat', readonly=False)
+    repeat_until = fields.Date(string="Recurrence End Date", compute='_compute_repeat', readonly=False)
+
+    @api.model
+    def _get_recurrence_fields(self):
+        return [
+            'repeat_interval',
+            'repeat_unit',
+            'repeat_type',
+            'repeat_until',
+        ]
+
+    @api.depends('recurring_procedure')
+    def _compute_repeat(self):
+        rec_fields = self._get_recurrence_fields()
+        defaults = self.default_get(rec_fields)
+        for procedure in self:
+            for f in rec_fields:
+                if procedure.recurrence_id:
+                    procedure[f] = procedure.recurrence_id.sudo()[f]
+                else:
+                    if procedure.recurring_procedure:
+                        procedure[f] = defaults.get(f)
+                    else:
+                        procedure[f] = False
+
+    def _is_recurrence_valid(self):
+        self.ensure_one()
+        return self.repeat_interval > 0 and\
+                (self.repeat_type != 'until' or self.repeat_until and self.repeat_until > fields.Date.today())
+    
+    @api.depends('recurrence_id')
+    def _compute_recurring_count(self):
+        self.recurring_count = 0
+        recurring_procedures = self.filtered(lambda l: l.recurrence_id)
+        count = self.env['acs.patient.procedure']._read_group([('recurrence_id', 'in', recurring_procedures.recurrence_id.ids)], ['recurrence_id'], ['__count'])
+        procedures_count = {recurrence.id: count for recurrence, count in count}
+        for procedure in recurring_procedures:
+            procedure.recurring_count = procedures_count.get(procedure.recurrence_id.id, 0)
+
+    # ------------------------------------------------
+    # CRUD overrides
+    # ------------------------------------------------
+    @api.model
+    def default_get(self, default_fields):
+        vals = super(AcsPatientProcedure, self).default_get(default_fields)
+
+        if 'repeat_until' in default_fields:
+            vals['repeat_until'] = fields.Date.today() + timedelta(days=7)
+
+        return vals
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        for vals in vals_list:
+            # recurrence
+            rec_fields = vals.keys() & self._get_recurrence_fields()
+            if rec_fields and vals.get('recurring_procedure') is True:
+                rec_values = {rec_field: vals[rec_field] for rec_field in rec_fields}
+                recurrence = self.env['acs.procedure.recurrence'].create(rec_values)
+                vals['recurrence_id'] = recurrence.id
+
+        procedures = super().create(vals_list)
+        return procedures
+
+    def write(self, vals):
+        # recurrence fields
+        rec_fields = vals.keys() & self._get_recurrence_fields()
+        if rec_fields:
+            rec_values = {rec_field: vals[rec_field] for rec_field in rec_fields}
+            for procedure in self:
+                if procedure.recurrence_id:
+                    procedure.recurrence_id.write(rec_values)
+                elif vals.get('recurring_procedure'):
+                    recurrence = self.env['acs.procedure.recurrence'].create(rec_values)
+                    procedure.recurrence_id = recurrence.id
+
+        if not vals.get('recurring_procedure', True) and self.recurrence_id:
+            procedures_in_recurrence = self.recurrence_id.procedure_ids
+            self.recurrence_id.unlink()
+            procedures_in_recurrence.write({'recurring_procedure': False})
+
+        result = super().write(vals)
+        return result
+
+    def unlink(self):
+        last_procedure_id_per_recurrence_id = self.recurrence_id._get_last_procedure_id_per_recurrence_id()
+        for procedure in self:
+            if procedure.id == last_procedure_id_per_recurrence_id.get(procedure.recurrence_id.id):
+                procedure.recurrence_id.unlink()
+        return super().unlink()
+
+    @api.returns('self', lambda value: value.id)
+    def copy(self, default=None):
+        if default is None:
+            default = {}
+        if not default.get('name'):
+            default['name'] = _("%s (copy)", self.name)
+        if self.recurrence_id:
+            default['recurrence_id'] = self.recurrence_id.copy().id
+        return super(AcsPatientProcedure, self).copy(default)
+
+    def action_recurring_procedures(self):
+        return {
+            'name': 'Procedures in Recurrence',
+            'type': 'ir.actions.act_window',
+            'res_model': 'acs.patient.procedure',
+            'view_mode': 'tree,form',
+            'context': {'create': False},
+            'domain': [('recurrence_id', 'in', self.recurrence_id.ids)],
+        }
+    
+    def action_unlink_recurrence(self):
+        self.recurrence_id.procedure_ids.recurring_procedure = False
+        self.recurrence_id.unlink()
+    
+    def action_done(self):
+        super().action_done()
+        last_procedure_id_per_recurrence_id = self.recurrence_id._get_last_procedure_id_per_recurrence_id()
+        for procedure in self:
+            if procedure.id == last_procedure_id_per_recurrence_id.get(procedure.recurrence_id.id):
+                procedure.recurrence_id._create_next_occurrence(procedure)
+
+    #===========end recurring code=======#
+    @api.onchange('product_id')
+    def onchange_product(self):
+        res = super(AcsPatientProcedure, self).onchange_product()
+        if self.product_id:
+            self.recurring_procedure = self.product_id.recurring_procedure
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: models/procedure_recurrence.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
+
+from odoo import _, api, fields, models, Command
+from odoo.exceptions import ValidationError
+
+from dateutil.relativedelta import relativedelta
+
+
+class AcsProcedureRecurrence(models.Model):
+    _name = 'acs.procedure.recurrence'
+    _description = 'Procedure Recurrence'
+
+    procedure_ids = fields.One2many('acs.patient.procedure', 'recurrence_id')
+    repeat_interval = fields.Integer(string='Repeat Every', default=1)
+    repeat_unit = fields.Selection([
+        ('day', 'Days'),
+        ('week', 'Weeks'),
+        ('month', 'Months'),
+        ('year', 'Years'),
+    ], default='week')
+    repeat_type = fields.Selection([
+        ('forever', 'Forever'),
+        ('until', 'Until'),
+    ], default="forever", string="Until")
+    repeat_until = fields.Date(string="End Date")
+
+    @api.constrains('repeat_interval')
+    def _check_repeat_interval(self):
+        if self.filtered(lambda t: t.repeat_interval <= 0):
+            raise ValidationError(_('The interval should be greater than 0'))
+
+    @api.constrains('repeat_type', 'repeat_until')
+    def _check_repeat_until_date(self):
+        today = fields.Date.today()
+        if self.filtered(lambda t: t.repeat_type == 'until' and t.repeat_until < today):
+            raise ValidationError(_('The end date should be in the future'))
+
+    @api.model
+    def _get_recurring_fields_to_copy(self):
+        return ['company_id', 'description', 'patient_id', 'product_id', 'recurrence_id',
+                'price_unit', 'physician_id', 'diseas_id', 'treatment_id', 'department_id',
+                'name', 'recurring_procedure', 'consumable_line_ids']
+
+    @api.model
+    def _get_recurring_fields_to_postpone(self):
+        return [
+            'date',
+        ]
+
+    def _get_last_procedure_id_per_recurrence_id(self):
+        return {} if not self else {
+            recurrence.id: max_procedure_id
+            for recurrence, max_procedure_id in self.env['acs.patient.procedure'].sudo()._read_group(
+                [('recurrence_id', 'in', self.ids)],
+                ['recurrence_id'],
+                ['id:max'],
+            )
+        }
+
+    def _get_recurrence_delta(self):
+        return relativedelta(**{
+            f"{self.repeat_unit}s": self.repeat_interval
+        })
+
+    def _create_next_occurrence(self, occurrence_from):
+        self.ensure_one()
+        self.env['acs.patient.procedure'].sudo().create(
+            self._create_next_occurrence_values(occurrence_from)
+        )
+
+    def _create_next_occurrence_values(self, occurrence_from):
+        self.ensure_one()
+        fields_to_copy = occurrence_from.read(self._get_recurring_fields_to_copy()).pop()
+        create_values = {
+            field: value[0] if isinstance(value, tuple) else value
+            for field, value in fields_to_copy.items()
+        }
+
+        fields_to_postpone = occurrence_from.read(self._get_recurring_fields_to_postpone()).pop()
+        fields_to_postpone.pop('id', None)
+        create_values.update({
+            field: value and value + self._get_recurrence_delta()
+            for field, value in fields_to_postpone.items()
+        })
+
+        return create_values
+
+```
+
+Views:
+  File: views/procedure_view.xml
+  Content:
+```
+<?xml version="1.0"?>
+<odoo>
+
+     <!-- Product -->
+    <record id="product_template_form_view_inherit" model="ir.ui.view">
+        <field name="name">product.template.product.recurrance.details</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="acs_hms.product_template_form_view_inherit"/>
+        <field name="arch" type="xml">
+            <field name="procedure_time" position="after">
+                <field name="recurring_procedure"/>
+            </field>
+        </field>
+    </record>
+
+    <!-- Procedure Group -->
+    <record id="view_procedure_group_form" model="ir.ui.view">
+        <field name="name">procedure.group.form</field>
+        <field name="model">procedure.group</field>
+        <field name="inherit_id" ref="acs_hms.view_procedure_group_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='line_ids']//field[@name='days_to_add']" position="after">
+                <field name="recurring_procedure"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Treatement -->
+    <record id="view_hospital_hms_treatment_form" model="ir.ui.view">
+        <field name="name">hms.treatment.form</field>
+        <field name="model">hms.treatment</field>
+        <field name="inherit_id" ref="acs_hms.view_hospital_hms_treatment_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='patient_procedure_ids']//field[@name='price_unit']" position="before">
+                <field name="recurring_procedure" optinal="hide"/>
+                <field name="repeat_type" invisible="1"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_acs_patient_procedure_form" model="ir.ui.view">
+        <field name="name">acs.patient.procedure.form</field>
+        <field name="model">acs.patient.procedure</field>
+        <field name="inherit_id" ref="acs_hms.view_acs_patient_procedure_form"/>
+        <field name="arch" type="xml">
+            <div name="button_box" position="inside">
+                <button name="action_recurring_procedures" type="object" invisible="not recurrence_id" class="oe_stat_button" icon="fa-repeat" groups="acs_hms_recurring_procedure.group_recurring_procedures">
+                    <field name="recurring_count" widget="statinfo" string="Recurring Procedures"/>
+                </button>
+            </div>
+            <field name="invoice_id" position="after">
+                <field name="recurring_procedure" groups="acs_hms_recurring_procedure.group_recurring_procedures"/>
+                <label for="repeat_interval" groups="acs_hms_recurring_procedure.group_recurring_procedures" invisible="not recurring_procedure"/>
+                <div invisible="not recurring_procedure" class="d-flex" groups="acs_hms_recurring_procedure.group_recurring_procedures">
+                    <field name="repeat_interval" required="recurring_procedure" class="me-2" style="max-width: 2rem !important;"/>
+                    <field name="repeat_unit" required="recurring_procedure" class="me-2" style="max-width: 4rem !important;"/>
+                    <field name="repeat_type" required="recurring_procedure" class="me-2" style="max-width: 15rem !important;"/>
+                    <field name="repeat_until" invisible="repeat_type != 'until'" required="repeat_type == 'until'" class="me-2"/>
+                </div>
+                <field name="recurring_procedure" invisible="1"/>
+                <field name="recurrence_id" invisible="1"/>
+            </field>
+        </field>
+    </record>
+
+</odoo>
+```
+
+Security:
+  File: security/security.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="0">
+
+    <record id ="group_recurring_procedures" model="res.groups">
+        <field name="name">Manage Recurring Procedures</field>
+        <field name="category_id" ref="acs_hms_base.module_category_hms_extra"/>
+        <field name="users" eval="[(4, ref('base.user_root')), (4, ref('base.user_admin'))]"/>
+    </record>
+
+</odoo>
+```
+
+Data:
+  File: data/data.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+
+</odoo>
+```
+
+Static:
+  File: static/description/index.html
+  Content:
+```
+<head>
+  <style>
+      .backgrounds{background-color:#fff; color:#0B80E6}
+  </style>
+</head>
+
+<section class="oe_container">
+    <div class="mt32 mb32">
+        <div style="background-color: #2d9f9d; background-image: linear-gradient(#918c8c, #2d9f9d); background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%); border-radius: 10px 10px 10px 10px; min-height: 160px;">
+            <div class="text-white font-weight-bold" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                <div class="pt-2 text-center">
+                    <span>
+                    <span class="pt-2 text-center" style="font-size:27px;">Almighty Consulting Solutions Pvt. Ltd.</span><br/>
+                </div>
+                <div class="row mt16">
+                    <div class="col-4 text-center">
+                        <span>Supported Editions</span><br/> 
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Community 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Enterprise 
+                        </span>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <a href="https://www.almightycs.com" target="_blank">
+                            <img src="almightycs.png" width="80" height="auto">
+                        </a>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <span>Supported Hostings <br/></span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Odoo.sh 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Cloud
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>On Premise 
+                        </span><br/>
+                        <span class="pt-2 text-center" style="font-size:12px;">App can not be used on odoo online.</span><br/>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+ 
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12 oe_mt32 mb32">
+            <h3 class="oe_slogan">Recurring Procedure (Hospital Management System)</h3><h4><br/>Allow users to manage recurrence of proceduers for patient.</h4>
+        </div>
+    </div> 
+</section>
+
+<section class="oe_mt32">
+    <div class='text-center mt92'>
+        <h2> Detailed Description of Module</h2>
+    </div>
+    <div class="panel-body">
+        <div class="alert alert-info">
+            <a data-toggle="collapse" href="#acs_recurring_procedure"><i class="fa fa-plus-circle"></i></a>
+            <b> Recurring Procedure (Hospital Management System)</b>
+            <b style="float:right"><a href="http://www.almightycs.com" target="_blank">By ACS </b>
+        </div>
+        <div id="acs_recurring_procedure" class="panel-collapse collapse in" class="oe_span12">
+            <h3><i class="fa fa-hand-o-right text-success"></i> Option to set procedure as recurring procedure.</h3>
+            <h3><i class="fa fa-hand-o-right text-success"></i> Auto create recurring procedures based on cron job.</h3>
+        </div>
+    </div>
+</section>
+
+<section>
+    <div class="oe_row oe_spaced">
+        <h4 class="oe_slogan"><a href="http://www.almightycs.com">Almighty Consulting Solutions Pvt. Ltd.</a> </h4>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12">
+            <h3 class="oe_slogan">Other Configuration</h3>
+            <p class="oe_slogan">To use this module no technical knowledge is required. Just install module and functionality is ready to use. For more customization and help contact us.</p>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span6">
+            <div class="oe_demo o_picture o_screenshot">
+                <a href="https://www.almightycs.com" target="_blank">
+                    <img src="acs.png" width="200" height="auto">
+                </a>
+                <div class="oe_demo_footer oe_centeralign">Meet Us</div>
+            </div>
+        </div>
+        <div class="oe_span6">
+            <br/><br/>
+            <h2 class="oe_slogan">Do you need help?</h2>
+            <h3 class="oe_slogan">
+                Let's offer you the best services!
+            </h3>
+            <p class="oe_mt32 text-center">
+                Contact us by our official channels.
+            </p>
+            <p class="oe_mt32 text-center">
+                Skype: turkesh4friends 
+            </p>
+            <div class="oe_spaced">
+                <ul class="text-center list-inline">
+                    <li>
+                        <a href="https://www.linkedin.com/organization-guest/company/almighty-consulting-services" Target="_blank"><i class="fa fa-linkedin-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://www.facebook.com/AlmightyCS.ERP" Target="_blank"><i class="fa fa-facebook-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://github.com/tpa-odoo" Target="_blank"><i class="fa fa-github-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="mailto:info@almightycs.com" Target="_blank"><i class="fa fa-envelope-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://twitter.com/_AlmightyCS" Target="_blank" ><i class="fa fa-twitter-square fa-xs backgrounds"></i></a>
+                    </li>
+
+                    <li>
+                        <a title="Contact us" data-toggle="tooltip" data-placement="left" Target="_blank" href="https://www.almightycs.com/contactus"><i class="fa fa-globe fa-xs backgrounds"></i></a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+<section class="oe_container">
+
+    <div data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: fixed;
+            bottom: 10px;
+            right: 20px;
+            z-index: 1000;
+            box-shadow: 1px 2px 11px rgba(0, 0, 0, 0.3), -5px 7px 12px rgba(0, 0, 0, 0.22);
+            cursor: pointer;">
+        <span class="fa fa-2x fa-handshake-o"></span>
+    </div>
+    
+    <div class="collapse show" id="contactus-floating" style="z-index: 1006; position: fixed; bottom: 10px; right: 20px;">
+        <div style="width:246px; overflow: hidden;">
+            <div class="text-center acs-contactus-close" data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+                    width: 25px;
+                    height: 25px;
+                    margin-bottom: -25px;
+                    display: flex;
+                    color: white;
+                    align-items: center;
+                    justify-content: center;
+                    position: relative;
+                    z-index: 1000;
+                    cursor: pointer;">
+                <i class="fa fa-times"></i>
+            </div>
+            <div class="acs-contactus-data" style="
+                    margin-top: -17px;
+                    background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+                    border-radius: 10px 10px 10px 10px;
+                    padding-bottom: 10px;
+                    height: 106px;">
+                <div class="text-center" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                    <span class="pt-2 text-white font-weight-bold" style="">Contact AlmightyCS</span>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; font-size: 14px;">  
+                    <a href="skype:turkesh4friends" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-skype" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Skype</span>
+                    </a>
+                    <a href="https://www.almightycs.com" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-globe fa-spin" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Website</span>
+                    </a>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; 
+                    font-size: 14px; 
+                    padding-bottom: 20px; 
+                    padding-top: 22px;"> 
+                    <a href="mailto:info@almightycs.com" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-envelope" style="font-size: 19px;"></i>
+                        <span class="pt-2 font-weight-bold">Email</span>
+                    </a>
+                    <a href="https://www.almightycs.com/contactus" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-handshake-o" style="font-size: 20px;"></i>
+                        <span class="pt-2 font-weight-bold">Contactus</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div> 
+
+</section>
+```
+
+Doc:
+  File: doc/changelog.rst
+  Content:
+```
+`1.0.1                                                        [24/10/2023]`
+***************************************************************************
+- Migrated Module for v17
+```
+

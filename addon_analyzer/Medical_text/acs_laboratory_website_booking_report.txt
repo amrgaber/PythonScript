@@ -1,0 +1,1231 @@
+Addon: acs_laboratory_website_booking
+
+Manifest: __manifest__.py
+Content:
+```python
+# -*- coding: utf-8 -*-
+#╔══════════════════════════════════════════════════════════════════════╗
+#║                                                                      ║
+#║                  ╔═══╦╗       ╔╗  ╔╗     ╔═══╦═══╗                   ║
+#║                  ║╔═╗║║       ║║ ╔╝╚╗    ║╔═╗║╔═╗║                   ║
+#║                  ║║ ║║║╔╗╔╦╦══╣╚═╬╗╔╬╗ ╔╗║║ ╚╣╚══╗                   ║
+#║                  ║╚═╝║║║╚╝╠╣╔╗║╔╗║║║║║ ║║║║ ╔╬══╗║                   ║
+#║                  ║╔═╗║╚╣║║║║╚╝║║║║║╚╣╚═╝║║╚═╝║╚═╝║                   ║
+#║                  ╚╝ ╚╩═╩╩╩╩╩═╗╠╝╚╝╚═╩═╗╔╝╚═══╩═══╝                   ║
+#║                            ╔═╝║     ╔═╝║                             ║
+#║                            ╚══╝     ╚══╝                             ║
+#║                  SOFTWARE DEVELOPED AND SUPPORTED BY                 ║
+#║                ALMIGHTY CONSULTING SOLUTIONS PVT. LTD.               ║
+#║                      COPYRIGHT (C) 2016 - TODAY                      ║
+#║                      https://www.almightycs.com                      ║
+#║                                                                      ║
+#╚══════════════════════════════════════════════════════════════════════╝
+{
+    'name' : 'Laboratory Website Booking Management',
+    'summary' : 'Allow patients to Book Laboratory Appointment from website by AlmightyCS',
+    'description' : """Allow patients to Book Laboratory Appointment from website by AlmightyCS""",
+    'version': '1.0.2',
+    'category': 'Medical',
+    'author': 'Almighty Consulting Solutions Pvt. Ltd.',
+    'website': 'https://www.almightycs.com',
+    'license': 'OPL-1',
+    'depends' : ['acs_website_booking','acs_laboratory', 'acs_hms'],
+    'data' : [
+        'security/security.xml',
+        'security/ir.model.access.csv',
+        'data/data.xml',
+        'wizard/payment_link_views.xml',
+        'views/hms_base_view.xml',
+        'views/template.xml',
+        'views/menu_item.xml',
+    ],
+    'images': [
+        'static/description/acs_hms_online_booking_almightycs_cover.jpg',
+    ],
+    'installable': True,
+    'application': True,
+    'sequence': 1,
+    'price': 100,
+    'currency': 'EUR',
+}
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+__init__.py:
+Content:
+```python
+# -*- coding: utf-8 -*-
+
+from . import models
+from . import controllers
+from . import wizard
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+Models:
+  File: models/__init__.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from . import schedule
+from . import hms_base
+
+```
+
+  File: models/hms_base.py
+  Content:
+```
+# -*- encoding: utf-8 -*-
+
+from odoo import api, fields, models, http, tools, _, SUPERUSER_ID
+from datetime import timedelta
+from odoo.http import request
+
+
+class AcsLaboratoryRequest(models.Model):
+    _inherit = 'acs.laboratory.request'
+
+    patient_count = fields.Integer("Patient Count", default=1)
+    schedule_date = fields.Date(string='Schedule Date', readonly=False)
+    schedule_slot_id = fields.Many2one('acs.schedule.slot.lines', string = 'Schedule Slot')
+    booked_online = fields.Boolean('Booked Online')
+
+    @api.onchange('schedule_date')
+    def onchange_schedule_date(self):
+        self.schedule_slot_id = False
+
+    @api.onchange('schedule_slot_id')
+    def onchange_schedule_slot(self):
+        if self.schedule_slot_id:
+            self.date = self.schedule_slot_id.from_slot
+
+    #Based on slected collection center update type
+    def write(self, vals):
+        if 'collection_center_id' in vals and vals.get('collection_center_id'):
+            collection_center_id = self.env['acs.laboratory'].sudo().search([('id','=',vals.get('collection_center_id'))])
+
+        if 'schedule_slot_id' in vals and vals.get('schedule_slot_id'):
+            schedule_slot_id = self.env['acs.schedule.slot.lines'].sudo().search([('id','=',vals.get('schedule_slot_id'))])
+            if schedule_slot_id:
+                vals['schedule_date'] = schedule_slot_id.from_slot.date()
+                vals['date'] = schedule_slot_id.from_slot
+
+        return super(AcsLaboratoryRequest, self).write(vals)
+
+    @api.model
+    def clear_acs_laboratory_request_cron(self):
+        records = self.search([('booked_online','=', True),('state','=','draft')])
+        for record in records:
+            #cancel record after 20 minute if not paid
+            create_time = record.create_date + timedelta(minutes=20)
+            if create_time <= fields.Datetime.now():
+                if record.invoice_id:
+                    if record.state=='paid':
+                        continue
+                    record.invoice_id.action_invoice_cancel()
+                record.button_cancel()
+
+    def button_cancel(self):
+        res = super(AcsLaboratoryRequest, self).button_cancel()
+        self.schedule_slot_id = False
+        return res
+
+    def _get_default_payment_link_values(self):
+        self.ensure_one()
+        return {
+            'amount': self.total_price,
+            'currency_id': self.company_id.currency_id.id,
+            'partner_id': self.patient_id.partner_id.id,
+            'amount_max': self.total_price
+        }
+
+    def acs_get_booking_record(self):
+        booking_record = self.search([('state','=','draft'),('patient_id.user_id','=',self.env.user.id)], limit=1)
+        acs_patient_id = self.env.user.sudo().partner_id.acs_patient_id
+        if not booking_record and acs_patient_id:
+            booking_record = self.with_user(SUPERUSER_ID).create({
+                'patient_id': acs_patient_id.id,
+                'booked_online': True,
+            })
+        return booking_record
+
+
+class AcsLabTest(models.Model):
+    _inherit = 'acs.lab.test'
+
+    image_1920 = fields.Image("Image")
+    allowed_online_booking = fields.Boolean("Allowed Online Booking")
+
+
+class PaymentTransaction(models.Model):
+    _inherit = "payment.transaction"
+
+    acs_laboratoryrequest_id = fields.Many2one("acs.laboratory.request", string="Lab Request")
+
+    #Update Payments directs after successful payment.
+    def _reconcile_after_done(self):
+        for tx in self.filtered(lambda t: t.operation != 'validation' and t.acs_laboratoryrequest_id):
+            tx._acs_update_laboratory_request()
+        return super(PaymentTransaction, self)._reconcile_after_done()
+
+    #Update Lab request data.
+    def _acs_update_laboratory_request(self):
+        self.acs_laboratoryrequest_id.sudo().with_context(acs_online_transaction=True,default_create_stock_moves=False).create_invoice()
+        if self.acs_laboratoryrequest_id.sudo().state!='confirm':
+            self.acs_laboratoryrequest_id.sudo().with_context(acs_online_transaction=True).button_accept()
+
+        # Setup access token in advance to avoid serialization failure between
+        # edi postprocessing of invoice and displaying the sale order on the portal
+        self.acs_laboratoryrequest_id.invoice_id._portal_ensure_token()
+        self.invoice_ids = [(6, 0, [self.acs_laboratoryrequest_id.invoice_id.id])]
+
+```
+
+  File: models/schedule.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from odoo import api, fields, models, _
+
+class Acsschedule(models.Model):
+    _inherit = "acs.schedule"
+
+    schedule_type = fields.Selection(selection_add=[('laboratory','Laboratory')])
+    collection_center_id = fields.Many2one('acs.laboratory', string="Collection Center")
+    physician_ids = fields.Many2many('hms.physician', 'physician_acs_schedule_rel', 'schedule_id', 'physician_id', 'Physicians')
+
+class AcsScheduleSlotLines(models.Model):
+    _inherit = 'acs.schedule.slot.lines'
+
+    @api.depends('laboratory_request_ids','laboratory_request_ids.state')
+    def _acs_limit_count(self):
+        super()._acs_limit_count()
+        for slot in self.sudo():
+            if slot.acs_slot_id.acs_schedule_id.schedule_type=='laboratory':
+                linked_records = len(self.env['acs.laboratory.request'].sudo().search([('schedule_slot_id','=',slot.id),('state','!=','canceled')]))
+                slot.rem_limit = slot.limit - linked_records
+
+    laboratory_request_ids = fields.One2many('acs.laboratory.request', 'schedule_slot_id', string="Lab Requests")
+```
+
+Views:
+  File: views/hms_base_view.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+	<record id="hms_test_view" model="ir.ui.view">
+        <field name="name">acs.lab.test.form</field>
+        <field name="model">acs.lab.test</field>
+        <field name="inherit_id" ref="acs_laboratory.hms_test_view"/>
+        <field name="arch" type="xml">
+        	<xpath expr="//group" position="before">
+                <field name="image_1920" widget="image" class="oe_avatar" options="{'preview_image': 'image_1920'}"/>
+            </xpath>
+            <field name="result_value_type" position="after">
+                <field name="allowed_online_booking"/>
+            </field>
+        </field>
+    </record>
+
+	<!-- schedule -->
+    <record id="appointment_schedule_form" model="ir.ui.view">
+        <field name="name">acs.schedule.form</field>
+        <field name="model">acs.schedule</field>
+        <field name="inherit_id" ref="acs_website_booking.acs_schedule_form"/>
+        <field name="arch" type="xml">
+            <field name="company_id" position="after">
+                <field name="collection_center_id" invisible="schedule_type!='laboratory'" required="schedule_type=='laboratory'"/>
+            </field>
+        </field>
+    </record>
+ 
+    <record id="patient_laboratory_test_request_form" model="ir.ui.view">
+        <field name="name">acs.laboratory.request.form</field>
+        <field name="model">acs.laboratory.request</field>
+        <field name="inherit_id" ref="acs_laboratory.patient_laboratory_test_request_form"/>
+        <field name="arch" type="xml">
+            <field name="date" position="attributes">
+                <attribute name="force_save">True</attribute>
+            </field>
+            <page name="other_info" position="inside">
+                <group>
+                    <group>
+                        <field name='patient_count' readonly="state!='draft'"/>
+                    </group>
+                </group>
+            </page>
+            <field name="is_group_request" position="after">
+                <field name='collection_center_id' invisible="1"/>
+                <field name='booked_online' readonly="state!='draft'"/>
+                <label for="schedule_date" string="Schedule Date"/>
+                <div class="o_row">
+                    <field name="schedule_date"  nolabel="1" class="oe_inline" readonly="state!='draft'"/>
+                    <field name='schedule_slot_id' nolabel="1" class="oe_inline" domain=" [('acs_slot_id.slot_date','=',schedule_date),('acs_slot_id.acs_schedule_id.collection_center_id','=',collection_center_id)]" options="{'no_create': True}" readonly="state!='draft'"/>
+                </div>
+            </field>
+        </field>
+    </record>
+
+</odoo>
+
+```
+
+  File: views/menu_item.xml
+  Content:
+```
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+
+
+</odoo>
+```
+
+  File: views/template.xml
+  Content:
+```
+<odoo>
+
+    <template id="acs_lab_requests" inherit_id="acs_laboratory.lab_requests" name="Lab Requests">
+        <xpath expr="//th[@name='th_state']" position="after">
+            <th></th>
+        </xpath>
+        <xpath expr="//td[@name='td_state']" position="after">
+            <td>
+                <a t-if="lab_req.invoice_id" class="btn btn-primary" title="Pay Now" t-att-href="'/my/invoices/'+str(lab_req.invoice_id.id)+'#portal_pay'">Pay Now</a>
+            </td>
+        </xpath>
+    </template>
+
+    <template id="lab_req_progress_checkout" name="Lab Test Request Checkout">
+        <div class="row">
+            <t t-set="cancel_warning">'Are you sure you want to cancel process?'</t>
+            <t t-set="laboratory_request" t-value="website.acs_get_request('acs.laboratory.request')"/>
+            <div class="col-xl">
+                <div class="wizard">
+                    <span t-if="payment_step" class="o_wizard_has_extra_step d-none"/>
+                    <div class="progress-wizard">
+                        <a class="no-decoration" t-att-href="step&gt;=10 and '/create/lab/appointment' or '#'">
+                            <div id="wizard-step10" t-att-class="'acs-progress-step progress-wizard-step %s' % (step == 10 and 'active' or step&gt;10 and 'complete' or 'disabled')">
+                                <div class="progress-wizard-bar d-none d-md-block"/>
+                                <span class="progress-wizard-dot d-none d-md-inline-block"></span>
+                                <div class="text-center progress-wizard-steplabel">Patient Count &amp; Location</div>
+                            </div>
+                        </a>
+                        
+                        <a class="no-decoration" t-att-href="step&gt;=20 and '/acs/lab/slot' or '#'">
+                            <div id="wizard-step20" t-att-class="'acs-progress-step progress-wizard-step %s' % (step == 20 and 'active' or step&gt;20 and 'complete' or 'disabled')">
+                                <div class="progress-wizard-bar d-none d-md-block"/>
+                                <span class="progress-wizard-dot d-none d-md-inline-block"></span>
+                                <div class="text-center progress-wizard-steplabel">Select Slot</div>
+                            </div>
+                        </a>
+
+                        <a class="no-decoration" t-att-href="step&gt;=30 and '/acs/lab/tests' or '#'">
+                            <div id="wizard-step30" t-att-class="'acs-progress-step progress-wizard-step %s' % (step == 30 and 'active' or step&gt;30 and 'complete' or 'disabled')">
+                                <div class="progress-wizard-bar d-none d-md-block"/>
+                                <span class="progress-wizard-dot d-none d-md-inline-block"></span>
+                                <div class="text-center progress-wizard-steplabel">Lab Tests</div>
+                            </div>
+                        </a>
+
+                        <a class="no-decoration" t-att-href="step&gt;=40 and '/acs/lab/patients' or '#'">
+                            <div id="wizard-step40" t-att-class="'acs-progress-step progress-wizard-step %s' % (step == 40 and 'active' or step&gt;40 and 'complete' or 'disabled')">
+                                <div class="progress-wizard-bar d-none d-md-block"/>
+                                <span class="progress-wizard-dot d-none d-md-inline-block"></span>
+                                <div class="text-center progress-wizard-steplabel">Patient Data</div>
+                            </div>
+                        </a>
+
+                        <a class="no-decoration" t-att-href="'#'" t-if="payment_step">
+                            <div id="wizard-step50" t-att-class="'acs-progress-step progress-wizard-step %s' % (step == 50 and 'active' or step&gt;50 and 'complete' or 'disabled')">
+                                <div class="progress-wizard-bar d-none d-md-block"/>
+                                <span class="progress-wizard-dot d-none d-md-inline-block"></span>
+                                <div class="text-center progress-wizard-steplabel">Payment</div>
+                            </div>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div t-if="message" class="col-12 alert alert-success alert-dismissable d-print-none" role="status">
+                <button type="button" class="close" data-dismiss="alert" aria-label="Close">&amp;times;</button>
+                <strong>
+                    <span t-esc="message"/>
+                </strong>
+            </div>
+            <div t-if="error_message" class="col-12 alert alert-danger alert-dismissable d-print-none" role="status">
+                <button type="button" class="close" data-dismiss="alert" aria-label="Close">&amp;times;</button>
+                <strong>
+                    <span t-esc="error_message"/>
+                </strong>
+            </div>
+        </div> 
+    </template>
+
+    <template id="acs_location_card" name="Branch Card">
+        <div class="card card-default acs_location_card col-md-2 col-xs-6 acs_radio_block" style="padding:10px;">
+            <input type="radio" name="acs_location_id" class="acs_checkbox sr-only" t-att-value="acs_location.id" t-attf-id="acs_location{{acs_location.id}}" t-att-checked="'checked' if acs_location.id==acs_location_id else None" required=""/>
+            <label t-attf-for="acs_location{{acs_location.id}}" style="width: 100%;">
+                <div>
+                    <img t-if="acs_location.partner_id.image_1920" class="acs_location_image" t-attf-src="data:image/png;base64,{{acs_location.partner_id.image_1920}}" alt="Patient"/>
+                    <img t-else="" class="acs_location_image" src="/acs_laboratory_website_booking/static/description/acs_location.png" alt="Branch"/>
+                    <div class="acs_location_name">
+                        <strong><span t-esc="acs_location.name"/></strong>
+                    </div>
+                </div>
+            </label>
+        </div>
+    </template>
+
+    <template id="lab_appointment_patient_and_location" name="Select Patient Count &amp; Location">
+        <t t-call="website.layout">
+            <div id="wrap">
+                <div class="container oe_website_sale py-2">
+                    <div class="row">
+                        <t t-set="cancel_warning">'Are you sure you want to cancel process?'</t>
+                        <div class="col-12">
+                            <t t-call="acs_laboratory_website_booking.lab_req_progress_checkout">
+                                <t t-set="step" t-value="10"/>
+                            </t>
+                        </div>
+                        
+                        <form action="/acs/lab/slot" method="post" class="s_website_form container-fluid" enctype="multipart/form-data">
+                            <div class="row justify-content-md-center" t-if="laboratory_request">
+
+                                <div class="mb-0 py-2 col-md-4 col-sm-9 s_website_form_field s_website_form_custom s_website_form_required" data-type="char" data-name="Field">
+                                    <div class="row s_col_no_resize s_col_no_bgcolor">
+                                        <label class="col-form-label col-sm-auto s_website_form_label" style="width: 200px" for="patient_count">
+                                            <span class="s_website_form_label_content">Number of Patients</span>
+                                        </label>
+                                        <div class="col-sm">
+                                            <input id="contact1" type="number" class="form-control s_website_form_input" name="patient_count" required="True" t-att-value="laboratory_request.patient_count"/>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="row text-center acs_location_selection mt16">
+                                    <t t-foreach="locations" t-as="location">
+                                        <t t-call="acs_laboratory_website_booking.acs_location_card">
+                                            <t t-set="acs_location" t-value="location"/>
+                                        </t>
+                                    </t>
+                                </div>
+
+                            </div>
+
+                            <div class="row justify-content-md-center mt64" t-if="not laboratory_request">
+                                <a class="btn btn-default btn-primary mb32" t-if="request.website.is_public_user()" href="/web/login?redirect=/create/lab/appointment" help="Click here to login."> Login to book an Appointment.</a>
+
+                                <div t-if="not request.website.is_public_user()">
+                                    There is no Linked Patient with your Login. Please Contact Administartor.
+                                </div>
+                            </div>
+
+                            <div class="row" t-if="laboratory_request">
+                                <div class="col-12 clearfix text-center mt32 mb32">
+                                    <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                                    <button type="submit" class="btn btn-default btn-primary mb32 "> Next <span class="fa fa-long-arrow-right" />
+                                    </button>
+                                    <a t-attf-onclick="return confirm(#{cancel_warning});" t-attf-href="/" class="btn btn-default mb32">Cancel</a>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </t>
+    </template>
+
+    <template id="lab_appointment_slot" name="Select Slot">
+        <t t-call="website.layout">
+            <div id="wrap">
+                <div class="container oe_website_sale py-2">
+                    <div class="row">
+                        <t t-set="cancel_warning">'Are you sure you want to cancel process?'</t>
+                        <div class="col-12">
+                            <t t-call="acs_laboratory_website_booking.lab_req_progress_checkout">
+                                <t t-set="step" t-value="20"/>
+                            </t>
+                        </div>
+                        
+                        <div class="col-12 mt32">
+                            <form action="/acs/lab/tests" method="post" class="s_website_form container-fluid" enctype="multipart/form-data">
+                                <input type="hidden" name="slot_date" id="acs_slot_date"/>
+                                <input type="hidden" name="schedule_slot_id" id="acs_schedule_slot_id"/>
+                                <input type="hidden" name="last_date" t-att-value="last_date"/>
+                                <input type="hidden" name="disable_dates" t-att-value="disable_dates"/>
+                                <t t-if="not slots_data">
+                                    <div class="col-12 alert alert-danger">
+                                        <span>There are no slots available to book appointment please check later or contact with Management.</span>
+                                    </div>
+                                </t>
+
+                                <t t-if="slots_data">
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            <div id="ACSBookingDatePicker"></div>
+                                        </div>
+                                        <div class="col-md-8">
+                                            <div class="row">
+                                                <div class="acs_no_slots col-md-12 alert alert-danger text-center">
+                                                    <span>No slots available for selected date.</span>
+                                                </div>
+                                                <t t-foreach="slots_data" t-as="slot">
+                                                    <div class="acs_booking_slot col-2" t-att-id="slot['id']" t-att-data-slotline-id="slot['id']" t-att-data-date="slot['date']" style="display:none;">
+                                                        <span t-esc="slot['name']"/>
+                                                        <t t-if="department and slot['physician_name']">
+                                                            <span class="acs_small_font" t-esc="slot['physician_name']"/>
+                                                        </t>
+                                                        <div t-if="slot['show_fees']">
+                                                            <span class="acs_small_font">Fees: <t t-esc="slot['fees']"/></span>
+                                                        </div>
+                                                    </div>
+                                                </t>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </t>
+                                <div class="row">
+                                    <div class="col-12 clearfix text-center mt32 mb32">
+                                        <a class="btn btn-default btn-primary mb32" t-if="request.website.is_public_user()" href="/web/login?redirect=/create/lab/appointment" help="Click here to login."> Login to book an Appointment.</a>
+                                        <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                                        <button type="submit" t-if="not request.website.is_public_user() and slots_data"  class="btn btn-default btn-primary mb32 "> Next <span class="fa fa-long-arrow-right" />
+                                        </button>
+                                        <a t-attf-onclick="return confirm(#{cancel_warning});" t-attf-href="/" class="btn btn-default mb32">Cancel</a>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </t>
+    </template>
+
+    <template id="acs_lab_test_card" name="Lab Tests Card">
+        <div class="card card-default lab_test_card col-md-2 col-xs-6 acs_checkbox_block" style="padding:10px;width: 200px;">
+            <input type="checkbox" t-attf-name="lab_test-#{lab_test.id}" class="acs_checkbox sr-only" t-att-value="lab_test.id" t-attf-id="lab_test{{lab_test.id}}" t-att-checked="'checked' if lab_test.id in laboratory_request.line_ids.mapped('test_id').ids else None"/>
+            <label t-attf-for="lab_test{{lab_test.id}}" style="width: 100%;">
+                <div>
+                    <img t-if="lab_test.image_1920" class="acs_service_image" t-attf-src="data:image/png;base64,{{lab_test.image_1920}}" alt="Test" style="height:130px;"/>
+                    <img t-else="" class="acs_service_image" src="/acs_laboratory_website_booking/static/description/acs_service.png" alt="Test" style="height:130px;"/>
+                    <div>
+                        <span t-field="lab_test.name"/>
+                        <div class="lab_test_price">
+                            <span t-esc="lab_test.product_id.lst_price" t-options="{'widget': 'monetary', 'display_currency': currency_id}"/><br/>
+                        </div>
+                    </div>
+                </div>
+            </label>
+        </div>
+    </template>
+
+    <template id="lab_appointment_tests" name="Select Test">
+        <t t-call="website.layout">
+            <div id="wrap">
+                <div class="container oe_website_sale py-2">
+                    <div class="row">
+                        <t t-set="cancel_warning">'Are you sure you want to cancel process?'</t>
+                        <div class="col-12">
+                            <t t-call="acs_laboratory_website_booking.lab_req_progress_checkout">
+                                <t t-set="step" t-value="30"/>
+                            </t>
+                        </div>
+                        
+                        <form action="/acs/lab/patients" method="post" class="s_website_form container-fluid" enctype="multipart/form-data">
+                            
+                            <div class="row text-center acs_location_selection mt16" t-if="lab_tests">   
+                                <t t-set="display_image" t-value="any(lt.image_1920 for lt in lab_tests)"/>
+                                <t t-foreach="lab_tests" t-as="lab_test">
+                                    <!-- <div class="col-3 card">
+                                        <div t-if="display_image" class="card-body p-1 oe_lab_test_image">
+                                            <span t-field="lab_test.image_1920" t-options="{'widget': 'image', 'preview_image': 'image_1920' if lab_test_image_big else 'image_1920'}" class="d-flex h-100 justify-content-center align-items-center"/>
+                                        </div>
+                                        <div class="card-body p-0 text-center o_wsale_lab_test_information">
+                                            <div class="p-2 o_wsale_lab_test_information_text">
+                                                <h6 class="o_wsale_lab_tests_item_title">
+                                                    <span t-field="lab_test.name"/>
+                                                </h6>
+                                                <div class="lab_test_price">
+                                                    <span t-esc="lab_test.product_id.lst_price" t-options="{'widget': 'monetary', 'display_currency': currency_id}"/><br/>
+                                                </div>
+                                                <div>
+                                                    <input class="acs_lab_test_checkbox" type="checkbox" t-att-value="lab_test.id" t-attf-name="lab_test-#{lab_test.id}" t-att-checked="True if lab_test.id in laboratory_request.line_ids.mapped('test_id').ids else False"/>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div> -->
+                                    <t t-call="acs_laboratory_website_booking.acs_lab_test_card"/>
+                                </t>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-12 clearfix text-center mt32 mb32">
+                                    <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                                    <button type="submit" class="btn btn-default btn-primary mb32 "> Next <span class="fa fa-long-arrow-right" />
+                                    </button>
+                                    <a t-attf-onclick="return confirm(#{cancel_warning});"  t-attf-href="/" class="btn btn-default mb32">Cancel</a>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </t>
+    </template>
+
+    <template id="acs_patient_card" name="Patient Card">
+        <div class="card card-default lab_test_card col-md-2 col-xs-6 acs_checkbox_block" style="padding:10px;width:200px;">
+            <input type="checkbox" t-attf-name="patient-#{acs_patient.id}" class="acs_checkbox sr-only" t-att-value="acs_patient.id" t-attf-id="acs_patient{{acs_patient.id}}" t-att-checked="'checked' if acs_patient.id==patient.id else None"/>
+            <label t-attf-for="acs_patient{{acs_patient.id}}" style="width: 100%;">
+                <div>
+                    <img t-if="acs_patient.image_1920" class="acs_patient_image" t-attf-src="data:image/png;base64,{{acs_patient.image_1920}}" alt="Patient" style="height:130px;"/>
+                    <img t-else="" class="acs_patient_image" src="/acs_hms/static/src/img/patient.png" alt="Physician" style="height:130px;"/>
+                    <div class="acs_patient_name">
+                        <strong><span t-esc="acs_patient.name"/></strong>
+                    </div>
+                    <div>
+                        <span t-esc="acs_patient_relation"/>
+                        <a t-if="acs_patient_relation=='Self'" t-attf-href="/my/account?redirect=/acs/lab/patients"><i class="fa fa-pencil mx-1"/>Edit</a>
+                        <a t-else="" t-attf-href="/my/family/update/#{family_member.id}?redirect=/acs/lab/patients"><i class="fa fa-pencil mx-1"/>Edit</a>
+                    </div>
+                </div>
+            </label>
+        </div>
+    </template>
+
+    <template id="lab_appointment_patients" name="Select Patients">
+        <t t-call="website.layout">
+            <div id="wrap">
+                <div class="container oe_website_sale py-2">
+                    <div class="row">
+                        <t t-set="confirm_warning">'Are you sure you want to Cofirm Appointment and Process payment? Once redirected to Invocie page you can not change Any data. To Retray payment go to lab Requests and do it.'</t>
+                        <t t-set="cancel_warning">'Are you sure you want to cancel process?'</t>
+                        <div class="col-12">
+                            <t t-call="acs_laboratory_website_booking.lab_req_progress_checkout">
+                                <t t-set="step" t-value="40"/>
+                            </t>
+                        </div>
+                        
+                        <form action="/acs/lab/request/confirm" method="post" class="s_website_form container-fluid" enctype="multipart/form-data">
+                            
+                            <div class="row mt16 mb16">
+                                <a href="/my/family/new?redirect=/acs/lab/patients"><i class="fa fa-plus mx-1"/>Add New Family Member</a>
+                            </div>
+                            <div class="row text-center acs_location_selection">
+                                <t t-call="acs_laboratory_website_booking.acs_patient_card">
+                                    <t t-set="acs_patient" t-value="patient"/>
+                                    <t t-set="acs_patient_relation" t-value="'Self'"/>
+                                </t>
+                                <t t-foreach="family_members" t-as="family_member" t-if="family_members">
+                                    <t t-call="acs_laboratory_website_booking.acs_patient_card">
+                                        <t t-set="acs_patient" t-value="family_member.related_patient_id.sudo()"/>
+                                        <t t-set="acs_patient_relation" t-value="family_member.relation_id.name"/>
+                                    </t>
+                                </t>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-12 clearfix text-center mt32 mb32">
+                                    <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                                    <button type="submit" class="btn btn-default btn-primary mb32 " t-attf-onclick="return confirm(#{confirm_warning});"> 
+                                        <span t-if="payment_step">Pay</span>
+                                        <span t-else="">Submit</span>
+                                        <span class="fa fa-long-arrow-right" />
+                                    </button>
+                                    <a t-attf-onclick="return confirm(#{cancel_warning});" t-attf-href="/" class="btn btn-default mb32">Cancel</a>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </t>
+    </template>
+
+    <template id="lab_req_thank_you" name="Appointment Booked: Thank You">
+        <t t-call="website.layout">
+            <div id="wrap" class="oe_structure oe_empty">
+                <section>
+                    <div class="container">
+                        <div class="row">
+                            <div class="col-12">
+                                <div class="mb16 mt16">
+                                    <div style="text-align: center; color:green;font-size: 55px;">
+                                        Thank You!
+                                    </div><br/>
+                                    <div style="text-align: center; color:green;font-size: 25px;">
+                                        Your Laboratory request has been successfully <t t-if="laboratory_request.state=='accepted'">confirmed</t><t t-else="">submitted</t> , we will get back to you soon. Your reference number for this request is: <strong> <span t-field="laboratory_request.name"/> </strong>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </t>
+    </template>
+
+</odoo>
+```
+
+Controllers:
+  File: controllers/__init__.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from . import main
+
+```
+
+  File: controllers/main.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from odoo import http, fields, _
+from odoo.http import request
+from odoo.addons.portal.controllers.portal import CustomerPortal, pager as portal_pager, get_records_pager
+from odoo.addons.payment.controllers import portal as payment_portal
+from odoo.addons.website.controllers.main import Website
+from odoo.exceptions import AccessError, MissingError
+from odoo import fields, http, tools, _, SUPERUSER_ID
+from datetime import timedelta
+
+
+class HMSWebsite(Website):
+
+    def acs_lab_website_data(self, redirect=None, **post):
+        company_id = request.env.user.sudo().company_id
+        laboratory_request = self.acs_user_website_booking_data(model='acs.laboratory.request')
+        values = {
+            'payment_step': company_id.acs_allowed_booking_payment,
+            'laboratory_request': laboratory_request,
+            'redirect': redirect,
+            'error_message': post.get('error_message'),
+            'patient': request.env.user.acs_patient_id,
+            'error': {}
+        }
+        return values
+
+    @http.route(['/create/lab/appointment'], type='http', auth='public', website=True, sitemap=True)
+    def create_lab_appointment(self, redirect=None, **post):
+        values = self.acs_lab_website_data(redirect, **post)
+        values['locations'] = request.env['acs.laboratory'].sudo().search([('is_collection_center','=',True)])
+        return request.render("acs_laboratory_website_booking.lab_appointment_patient_and_location", values)
+
+    @http.route(['/acs/lab/slot'], type='http', auth='public', website=True, sitemap=False)
+    def select_lab_slot(self, redirect=None, **post):
+        values = self.acs_lab_website_data(redirect, **post)
+        laboratory_request = values.get('laboratory_request')
+        if not laboratory_request:
+            return request.redirect('/')
+        data = {}
+        if post.get('patient_count'):
+            data['patient_count'] = post.get('patient_count')
+
+        if post.get('collection_center_id'):
+            data['collection_center_id'] = post.get('collection_center_id')
+        if data:
+            laboratory_request.sudo().write(data)
+ 
+        schedule_data = {'schedule_type': 'laboratory', 'collection_center_id': laboratory_request.collection_center_id.id}
+        values['slots_data'] = request.env['acs.schedule'].acs_get_slot_data(**schedule_data)
+        values['disable_dates'] = request.env['acs.schedule'].acs_get_disabled_dates(**schedule_data)
+        values['last_date'] = fields.Date.today() + timedelta(days=request.env.user.sudo().company_id.acs_allowed_booking_online_days)
+        return request.render("acs_laboratory_website_booking.lab_appointment_slot", values)
+
+    @http.route(['/acs/lab/tests'], type='http', auth='public', website=True, sitemap=False)
+    def select_lab_tests(self, redirect=None, **post):
+        values = self.acs_lab_website_data(redirect, **post)
+        request.website.acs_get_request(model='acs.laboratory.request')
+        laboratory_request = values.get('laboratory_request')
+
+        data = {}
+        #if post.get('slot_date'):
+        #    data['slot_date'] = post.get('slot_date')
+        if post.get('schedule_slot_id'):
+            data['schedule_slot_id'] = int(post.get('schedule_slot_id'))
+        if data:
+            laboratory_request.sudo().write(data)
+        if not laboratory_request.schedule_slot_id:
+            error_message = _("Please Select at least one Slot to proceed ahead.")
+            return request.redirect('/acs/lab/slot?error_message=%s' % (error_message))
+
+        values['lab_tests'] = request.env['acs.lab.test'].sudo().search([('allowed_online_booking','=',True)])
+        values['currency_id'] = request.env.user.sudo().company_id.currency_id
+        return request.render("acs_laboratory_website_booking.lab_appointment_tests", values)
+
+    @http.route(['/acs/lab/patients'], type='http', auth='public', website=True, sitemap=False)
+    def select_lab_patients(self, redirect=None, **post):
+        values = self.acs_lab_website_data(redirect, **post)
+        laboratory_request = values.get('laboratory_request')
+        RequestLine = request.env['laboratory.request.line']
+
+        selected_tests = []
+        for rec in post:
+            vals = rec.split('lab_test-')
+            if len(vals)==2:
+                selected_tests.append(int(vals[1]))
+
+        if selected_tests:
+            laboratory_request.sudo().line_ids.unlink()
+            lab_tests = request.env['acs.lab.test'].sudo().search([('id','in',selected_tests)])
+            for test in lab_tests:
+                line = RequestLine.create({
+                    'test_id': test.id,
+                    'request_id': laboratory_request.id,
+                })
+                line.sudo().onchange_test()
+
+        if not laboratory_request.line_ids:
+            error_message = _("Please Select at least one Test to proceed ahead.")
+            return request.redirect('/acs/lab/tests?error_message=%s' % (error_message))
+
+        values['family_members'] = request.env.user.acs_patient_id and request.env.user.acs_patient_id.family_member_ids or False
+        return request.render("acs_laboratory_website_booking.lab_appointment_patients", values)
+
+    @http.route(['/acs/lab/request/confirm'], type='http', auth='public', website=True, sitemap=False)
+    def acs_confirm_request(self, redirect=None, **post):
+        values = self.acs_lab_website_data(redirect, **post)
+        laboratory_request = values.get('laboratory_request')
+        Patient = request.env['laboratory.request.line']
+        company_id = request.env.user.sudo().company_id
+
+        selected_patients = []
+        for rec in post:
+            vals = rec.split('patient-')
+            if len(vals)==2:
+                selected_patients.append(int(vals[1]))
+
+        if selected_patients:
+            if len(selected_patients)==1:
+                laboratory_request.sudo().write({'is_group_request': False, 'patient_id': selected_patients[0]})
+            else:
+                if laboratory_request.patient_id.id in selected_patients:
+                    user_selected_patients = selected_patients.copy()
+                    user_selected_patients.remove(laboratory_request.patient_id.id)
+                    data = {'is_group_request': True, 'group_patient_ids': [(6,0, user_selected_patients)]}
+                else:
+                    data = {'patient_id': selected_patients[0],'is_group_request': True, 'group_patient_ids': [(6,0, selected_patients)]}
+                laboratory_request.sudo().write(data)
+
+        if laboratory_request.patient_count!=len(selected_patients):
+            error_message = _("Please Select %s Patient to proceed ahead.") % (laboratory_request.patient_count)
+            return request.redirect('/acs/lab/patients?error_message=%s' % (error_message))
+
+        laboratory_request.sudo().button_requested()
+
+        if company_id.acs_allowed_booking_payment:
+            context = {'active_id': laboratory_request.id, 'active_model': 'acs.laboratory.request'}
+            payment_link_wiz = request.env['payment.link.wizard'].sudo().with_context(context).create({})
+            #if fee is 0 validate appointment
+            if payment_link_wiz.amount==0:
+                laboratory_request.sudo().with_context(acs_online_transaction=True).button_accept()
+                return request.render("acs_laboratory_website_booking.lab_req_thank_you", {'laboratory_request': laboratory_request})
+
+            return request.redirect(payment_link_wiz.link)
+        return request.render("acs_laboratory_website_booking.lab_req_thank_you", {'laboratory_request': laboratory_request})
+
+
+class AcsCustomerPortal(CustomerPortal):
+
+    @http.route(['/my/lab_requests/<model("acs.laboratory.request"):request_id>/payment'], type='http', auth="user", website=True, sitemap=False)
+    def lab_request_payment(self, request_id, **kwargs):
+        context = {'active_id': request_id.id, 'active_model': 'acs.laboratory.request'}
+        payment_link_wiz = request.env['payment.link.wizard'].sudo().with_context(context).create({})
+        #if fee is 0 validate appointment
+        if payment_link_wiz.amount==0:
+            request_id.sudo().with_context(acs_online_transaction=True).button_accept()
+            return request.render("acs_laboratory_website_booking.lab_req_thank_you", {'laboratory_request': request_id})
+        return request.redirect(payment_link_wiz.link)
+    
+    @http.route(['/my/lab_requests/<int:request_id>/paid'], type='http', auth="public", website=True, sitemap=False)
+    def my_lab_request_paid(self, request_id=None, access_token=None, **kw):
+        try:
+            record_sudo = self._document_check_access('acs.laboratory.request', request_id, access_token=access_token)
+        except (AccessError, MissingError):
+            return request.redirect('/my')
+        return request.render("acs_laboratory.my_lab_test_request", {'lab_request': record_sudo, 'is_paid': True})
+
+
+class AcsPaymentPortal(payment_portal.PaymentPortal):
+
+    @http.route(['/my/lab_requests/<model("acs.laboratory.request"):request_id>/paymentprocess'], type='json', auth="public", website=True, sitemap=False)
+    def laboratoryrequest_payment_process(self, request_id, access_token, **kwargs):
+        logged_in = not request.env.user._is_public()
+        partner_sudo = request.env.user.partner_id if logged_in else request_id.patient_id.partner_id
+        self._validate_transaction_kwargs(kwargs)
+        kwargs.update({ 
+            'partner_id': partner_sudo.id,
+            'currency_id': request_id.company_id.currency_id.id,
+        })
+        tx_sudo = self._create_transaction(
+            custom_create_values={'acs_laboratoryrequest_id': request_id.id}, **kwargs,
+        )
+        return tx_sudo._get_processing_values()
+
+    def _get_extra_payment_form_values(self, **kwargs):
+        """ Override of `payment` to reroute the payment flow to the portal view of the sales order.
+
+        :param str sale_order_id: The sale order for which a payment is made, as a `sale.order` id.
+        :return: The extended rendering context values.
+        :rtype: dict
+        """
+        form_values = super()._get_extra_payment_form_values(**kwargs)
+        acs_laboratoryrequest_id = kwargs.get('acs_laboratoryrequest_id')
+        if acs_laboratoryrequest_id:
+            acs_laboratoryrequest_id = self._cast_as_int(acs_laboratoryrequest_id)
+            order_sudo = request.env['acs.laboratory.request'].sudo().browse(acs_laboratoryrequest_id)
+
+            # Interrupt the payment flow if the sales order has been canceled.
+            if order_sudo.state == 'cancel':
+                form_values['amount'] = 0.0
+
+            # Reroute the next steps of the payment flow to the portal view of the sales order.
+            form_values.update({
+                'transaction_route': order_sudo.get_portal_url(suffix='/paymentprocess'),
+                'landing_route': order_sudo.get_portal_url(suffix='/paid'),
+                'access_token': order_sudo.access_token,
+            })
+        return form_values
+
+```
+
+Security:
+  File: security/security.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">
+
+        <record id="acs_laboratory_request_rule" model="ir.rule">
+            <field name="name">Portal Patient's Own and Family Lab Request</field>
+            <field name="model_id" ref="acs_laboratory.model_acs_laboratory_request"/>
+            <field name="domain_force">['|',('patient_id.acs_family_partner_ids','in',[user.partner_id.id]),('patient_id.partner_id','=',user.partner_id.id)]</field>
+            <field name="groups" eval="[(4, ref('base.group_portal'))]"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_unlink" eval="False"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+        </record>
+
+        <record id="acs_laboratory_result_rule" model="ir.rule">
+            <field name="name">Portal Patient's Own and Family Lab results</field>
+            <field name="model_id" ref="acs_laboratory.model_patient_laboratory_test"/>
+            <field name="domain_force">['|',('patient_id.acs_family_partner_ids','in',[user.partner_id.id]),('patient_id.partner_id','=',user.partner_id.id)]</field>
+            <field name="groups" eval="[(4, ref('base.group_portal'))]"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_unlink" eval="False"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+        </record>
+
+    </data>
+</odoo>
+
+```
+
+Data:
+  File: data/data.xml
+  Content:
+```
+<?xml version="1.0"?>
+<odoo>
+    <data noupdate="1">
+
+        <record id="menu_acs_laboratroy_appointment" model="website.menu">
+            <field name="name">Laboratory Booking</field>
+            <field name="url">/create/lab/appointment</field>
+            <field name="parent_id" ref="website.main_menu"/>
+            <field name="sequence" type="int">30</field>
+        </record>
+
+        <record forcecreate="True" id="ir_cron_clear_lab_appointment" model="ir.cron">
+            <field name="name">Clear Laboratory Appointment</field>
+            <field eval="True" name="active"/>
+            <field name="interval_number">15</field>
+            <field name="interval_type">minutes</field>
+            <field name="numbercall">-1</field>
+            <field eval="False" name="doall"/>
+            <field ref="acs_laboratory.model_acs_laboratory_request" name="model_id"/>
+            <field name="state">code</field>
+            <field eval="'model.clear_acs_laboratory_request_cron()'" name="code"/>
+        </record>
+
+     </data>
+</odoo>
+```
+
+Static:
+  File: static/description/index.html
+  Content:
+```
+<head>
+  <style>
+      .backgrounds{background-color:#fff; color:#0B80E6}
+  </style>
+</head>
+ 
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12 oe_mt32 mb32">
+            <h3 class="oe_slogan">Laboratory Website Booking</h3><h4><br/>This Module will Add functionality to Allow patients to Book an Laboratory Appointment from website.</h4>
+        </div>
+    </div>
+</section>
+
+<section class="oe_mt32">
+    <div class='text-center mt92'>
+        <h2> Detailed Description of Module</h2>
+    </div>
+    <div class="panel-body">
+        <div class="alert alert-info">
+            <a data-toggle="collapse" href="#acs_appointment"><i class="fa fa-plus-circle"></i></a>
+            <b> Online Laboratory Test Booking</b>
+            <b style="float:right"><a href="http://www.almightycs.com" target="_blank">By ACS </b>
+        </div>
+        <div id="acs_appointment" class="panel-collapse collapse in" class="oe_span12">
+            <h3><i class="fa fa-hand-o-right text-success"></i> The patient can create an appointment by selecting a date and available slot.</h3>
+            <h3><i class="fa fa-hand-o-right text-success"></i> After selecting a proper date and slot patient dan do payment and complete booking.</h3>
+            <h3><i class="fa fa-hand-o-right text-success"></i> Admin can create Slots manually and automatically.</h3>
+            <h3><i class="fa fa-hand-o-right text-success"></i> Admin can Configure to allow patient to book appointment by .</h3>
+            <h3><i class="fa fa-hand-o-right text-success"></i> Limit of possible booking per slot can be configured.</h3>
+            <h3><i class="fa fa-hand-o-right text-success"></i> Slot creation can be done easily using a wizard.</h3>
+            <h3><i class="fa fa-hand-o-right text-success"></i> The online booked lab request can be seen and filtered easily.</h3>
+            <h3><i class="fa fa-hand-o-right text-success"></i> Admin can configure advance booking day availability.</h3>
+        </div> 
+    </div>
+</section>
+
+<section>
+    <div class="oe_row oe_spaced mt96">
+        <h4 class="oe_slogan"><a href="http://www.almightycs.com">Almighty Consulting Solutions Pvt. Ltd.</a> </h4>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12">
+            <h3 class="oe_slogan">Other Configuration</h3>
+            <p class="oe_slogan">To use this module no technical knowledge is required. Just install module and functionality is ready to use. For more customization and help contact us.</p>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span6">
+            <div class="oe_demo e_picture o_screenshot">
+                <a href="https://www.almightycs.com" target="_blank">
+                    <img src="acs.png" width="200" height="auto">
+                </a>
+                <div class="oe_demo_footer oe_centeralign">Meet Us</div>
+            </div>
+        </div>
+        <div class="oe_span6">
+            <br/><br/>
+            <h2 class="oe_slogan">Do you need help?</h2>
+            <h3 class="oe_slogan">
+                Let's offer you the best services!
+            </h3>
+            <p class="oe_mt32 text-center">
+                Contact us by our official channels.
+            </p>
+            <p class="oe_mt32 text-center">
+                Skype: turkesh4friends 
+            </p>
+            <div class="oe_spaced">
+                <ul class="text-center list-inline">
+                    <li>
+                        <a href="https://www.linkedin.com/organization-guest/company/almighty-consulting-services" Target="_blank"><i class="fa fa-linkedin-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://www.facebook.com/AlmightyCS.ERP" Target="_blank"><i class="fa fa-facebook-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://github.com/tpa-odoo" Target="_blank"><i class="fa fa-github-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="mailto:info@almightycs.com" Target="_blank"><i class="fa fa-envelope-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://twitter.com/_AlmightyCS" Target="_blank" ><i class="fa fa-twitter-square fa-xs backgrounds"></i></a>
+                    </li>
+
+                    <li>
+                        <a title="Contact us" data-toggle="tooltip" data-placement="left" Target="_blank" href="https://www.almightycs.com/contactus"><i class="fa fa-globe fa-xs backgrounds"></i></a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+<section class="oe_container">
+
+    <div data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: fixed;
+            bottom: 10px;
+            right: 20px;
+            z-index: 1000;
+            box-shadow: 1px 2px 11px rgba(0, 0, 0, 0.3), -5px 7px 12px rgba(0, 0, 0, 0.22);
+            cursor: pointer;">
+        <span class="fa fa-2x fa-handshake-o"></span>
+    </div>
+    
+    <div class="collapse show" id="contactus-floating" style="z-index: 1006; position: fixed; bottom: 10px; right: 20px;">
+        <div style="width:246px; overflow: hidden;">
+            <div class="text-center acs-contactus-close" data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+                    width: 25px;
+                    height: 25px;
+                    margin-bottom: -25px;
+                    display: flex;
+                    color: white;
+                    align-items: center;
+                    justify-content: center;
+                    position: relative;
+                    z-index: 1000;
+                    cursor: pointer;">
+                <i class="fa fa-times"></i>
+            </div>
+            <div class="acs-contactus-data" style="
+                    margin-top: -17px;
+                    background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+                    border-radius: 10px 10px 10px 10px;
+                    padding-bottom: 10px;
+                    height: 106px;">
+                <div class="text-center" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                    <span class="pt-2 text-white font-weight-bold" style="">Contact AlmightyCS</span>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; font-size: 14px;">  
+                    <a href="skype:turkesh4friends" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-skype" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Skype</span>
+                    </a>
+                    <a href="https://www.almightycs.com" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-globe fa-spin" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Website</span>
+                    </a>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; 
+                    font-size: 14px; 
+                    padding-bottom: 20px; 
+                    padding-top: 22px;"> 
+                    <a href="mailto:info@almightycs.com" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-envelope" style="font-size: 19px;"></i>
+                        <span class="pt-2 font-weight-bold">Email</span>
+                    </a>
+                    <a href="https://www.almightycs.com/contactus" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-handshake-o" style="font-size: 20px;"></i>
+                        <span class="pt-2 font-weight-bold">Contactus</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div> 
+
+</section>
+```
+
+Doc:
+  File: doc/changelog.rst
+  Content:
+```
+`1.0.2                                                        [25/11/2023]`
+***************************************************************************
+- Improved test selction UI.
+
+`1.0.1                                                        [11/10/2023]`
+***************************************************************************
+- Migrated Module for v17
+```
+
+Other_files:
+  File: wizard/__init__.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from . import payment_link
+
+```
+
+  File: wizard/payment_link.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+# Part of AlmightyCS. See LICENSE file for full copyright and licensing details.
+
+from werkzeug import urls
+
+from odoo import api, fields, models, _
+
+
+class PaymentLinkWizard(models.TransientModel):
+    _inherit = 'payment.link.wizard'
+
+    def _get_payment_provider_available(self, **kwargs):
+        if kwargs.get('res_model') == 'acs.laboratory.request':
+            kwargs['acs_laboratoryrequest_id'] = kwargs.get('res_id')
+        return super()._get_payment_provider_available(**kwargs)
+
+    def _get_additional_link_values(self):
+        """ Override of `payment` to add `acs_laboratory_request_id` to the payment link values.
+
+        The other values related to the laboratory request from _get_default_payment_link_values.
+
+        Note: self.ensure_one()
+
+        :return: The additional payment link values.
+        :rtype: dict
+        """
+        res = super()._get_additional_link_values()
+        if self.res_model != 'acs.laboratory.request':
+            return res
+
+        # Order-related fields are retrieved in the controller
+        return {
+            'acs_laboratoryrequest_id': self.res_id,
+        }
+
+```
+
+  File: wizard/payment_link_views.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="action_acs_payment_generate_link" model="ir.actions.act_window">
+        <field name="name">Generate a Payment Link</field>
+        <field name="res_model">payment.link.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="view_id" ref="payment.payment_link_wizard_view_form"/>
+        <field name="target">new</field>
+        <field name="binding_model_id" ref="acs_laboratory.model_acs_laboratory_request"/>
+        <field name="binding_view_types">form</field>
+    </record>
+
+</odoo>
+
+```
+

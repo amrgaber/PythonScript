@@ -1,0 +1,1508 @@
+Addon: acs_hms_certification
+
+Manifest: __manifest__.py
+Content:
+```python
+# -*- coding: utf-8 -*-
+#╔══════════════════════════════════════════════════════════════════════╗
+#║                                                                      ║
+#║                  ╔═══╦╗       ╔╗  ╔╗     ╔═══╦═══╗                   ║
+#║                  ║╔═╗║║       ║║ ╔╝╚╗    ║╔═╗║╔═╗║                   ║
+#║                  ║║ ║║║╔╗╔╦╦══╣╚═╬╗╔╬╗ ╔╗║║ ╚╣╚══╗                   ║
+#║                  ║╚═╝║║║╚╝╠╣╔╗║╔╗║║║║║ ║║║║ ╔╬══╗║                   ║
+#║                  ║╔═╗║╚╣║║║║╚╝║║║║║╚╣╚═╝║║╚═╝║╚═╝║                   ║
+#║                  ╚╝ ╚╩═╩╩╩╩╩═╗╠╝╚╝╚═╩═╗╔╝╚═══╩═══╝                   ║
+#║                            ╔═╝║     ╔═╝║                             ║
+#║                            ╚══╝     ╚══╝                             ║
+#║                  SOFTWARE DEVELOPED AND SUPPORTED BY                 ║
+#║                ALMIGHTY CONSULTING SOLUTIONS PVT. LTD.               ║
+#║                      COPYRIGHT (C) 2016 - TODAY                      ║
+#║                      https://www.almightycs.com                      ║
+#║                                                                      ║
+#╚══════════════════════════════════════════════════════════════════════╝
+{
+    'name': 'HMS Certificate Management System',
+    'summary': """This Module will Add functionality to provide certificate to Patients. Maintain history of certificate allocation.""",
+    'description': """
+        This Module will Add functionality to provide certificate to Patients. Maintain history of certificate allocation.
+        Certification hospital certificate medical certificate patient certification ACS HMS
+    """,
+    'version': '1.0.1',
+    'category': 'Medical',
+    'author': 'Almighty Consulting Solutions Pvt. Ltd.',
+    'support': 'info@almightycs.com',
+    'website': 'https://www.almightycs.com',
+    'license': 'OPL-1',
+    'depends': ["acs_hms", "acs_certification"],
+    'data' : [
+        'security/security.xml',
+        'security/ir.model.access.csv',
+        'report/certificate_report.xml',
+        'views/certificate_management_view.xml',
+        'views/res_config_views.xml',
+        'views/portal_template.xml',
+        'views/template.xml',
+    ],
+    'images': [
+        'static/description/hms_certificate_almightycs_cover.jpg',
+    ],
+    'installable': True,
+    'application': True,
+    'sequence': 2,
+    'price': 10,
+    'currency': 'USD',
+}
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+
+```
+
+__init__.py:
+Content:
+```python
+# -*- encoding: utf-8 -*-
+
+from . import controllers
+from . import models
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+Models:
+  File: models/__init__.py
+  Content:
+```
+# -*- encoding: utf-8 -*-
+
+from . import certificate_management
+from . import res_config
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+
+```
+
+  File: models/certificate_management.py
+  Content:
+```
+# -*- encoding: utf-8 -*-
+from odoo import _, api, fields, models, tools
+from odoo.exceptions import UserError
+import uuid
+
+
+class CertificateManagement(models.Model):
+    _name = 'certificate.management'
+    _inherit = ['certificate.management', 'acs.qrcode.mixin', 'portal.mixin']
+
+    patient_id = fields.Many2one('hms.patient', string='Patient', ondelete="restrict", 
+        help="Patient whose certificate to be attached", tracking=True)
+    physician_id = fields.Many2one('hms.physician',string='Doctor', ondelete="restrict", 
+        help="Doctor who provided certificate to the patient", tracking=True)
+    appointment_id = fields.Many2one('hms.appointment', string='Appointment', ondelete="restrict", 
+        help="Patient Appointment")
+
+    @api.onchange('patient_id')
+    def onchange_patient_id(self):
+        if self.patient_id:
+            self.partner_id = self.patient_id.partner_id
+
+    @api.onchange('physician_id')
+    def onchange_physician_id(self):
+        if self.physician_id:
+            self.user_id = self.physician_id.user_id
+
+    def _compute_access_url(self):
+        super(CertificateManagement, self)._compute_access_url()
+        for rec in self:
+            rec.access_url = '/my/certificates/%s' % (rec.id)
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        res = super().create(vals_list)
+        for record in res:
+            record.unique_code = uuid.uuid4()
+        return res
+
+
+class ACSPatient(models.Model):
+    _inherit = 'hms.patient' 
+
+    def _rec_count(self):
+        rec = super(ACSPatient, self)._rec_count()
+        for rec in self:
+            rec.certificate_count = len(rec.sudo().certificate_ids)
+
+    certificate_ids = fields.One2many('certificate.management', 'patient_id', string='Certificates', groups="acs_certification.group_certificate_manager")
+    certificate_count = fields.Integer(compute='_rec_count', string='# Certificates')
+
+    def action_open_certificate(self):
+        action = self.env["ir.actions.actions"]._for_xml_id("acs_certification.action_certificate_management")
+        action['domain'] = [('patient_id','=',self.id)]
+        action['context'] = {'default_patient_id': self.id}
+        return action
+
+
+class HmsAppointment(models.Model):
+    _inherit = 'hms.appointment' 
+
+    def _certificate_count(self):
+        for rec in self:
+            rec.certificate_count = len(rec.sudo().certificate_ids)
+
+    certificate_ids = fields.One2many('certificate.management', 'appointment_id', string='Certificates', groups="acs_certification.group_certificate_manager")
+    certificate_count = fields.Integer(compute='_certificate_count', string='# Certificates')
+
+    def action_open_certificate(self):
+        action = self.env["ir.actions.actions"]._for_xml_id("acs_certification.action_certificate_management")
+        action['domain'] = [('appointment_id','=',self.id)]
+        action['context'] = {
+            'default_appointment_id': self.id,
+            'default_patient_id': self.patient_id and self.patient_id.id or False,
+            'default_physician_id': self.physician_id and self.physician_id.id or False,
+        }
+        return action
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: models/res_config.py
+  Content:
+```
+# -*- encoding: utf-8 -*-
+from odoo import api, fields, models,_
+
+
+class ResCompany(models.Model):
+    _inherit = "res.company"
+
+    acs_certificate_qrcode = fields.Boolean(string="Print Authetication QrCode on Certificate", default=True)
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        res = super().create(vals_list)
+        for record in res:
+            record.acs_create_sequence(name='Certificate Management', code='certificate.management', prefix='CRT')
+        return res
+
+
+class ResConfigSettings(models.TransientModel):
+    _inherit = 'res.config.settings'
+
+    acs_certificate_qrcode = fields.Boolean(related='company_id.acs_certificate_qrcode', string="Print Authetication QrCode on Certificate", readonly=False)
+ 
+```
+
+Views:
+  File: views/certificate_management_view.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Patient -->
+    <record model="ir.ui.view" id="view_hms_patient_certificate_form">
+        <field name="name">hms.patient.certificate.view.inherit</field>
+        <field name="model">hms.patient</field>
+        <field name="inherit_id" ref="acs_hms.view_patient_form" />
+        <field name="arch" type="xml">
+            <div name='button_box' position="inside">
+                <button name="action_open_certificate" groups="acs_certification.group_certificate_manager" type="object" class="oe_stat_button" icon="fa-certificate">
+                    <field string="Certificates" name="certificate_count" widget="statinfo"/>
+                </button>
+            </div>
+        </field>
+    </record>
+
+    <!-- Appointment -->
+    <record model="ir.ui.view" id="view_hms_appointment_form">
+        <field name="name">hms.appointment.certificate.view.inherit</field>
+        <field name="model">hms.appointment</field>
+        <field name="inherit_id" ref="acs_hms.view_hms_appointment_form"/>
+        <field name="arch" type="xml">
+            <div name='button_box' position="inside">
+                <button name="action_open_certificate" groups="acs_certification.group_certificate_manager" type="object" class="oe_stat_button" icon="fa-certificate">
+                    <field string="Certificates" name="certificate_count" widget="statinfo"/>
+                </button>
+            </div>
+        </field>
+    </record>
+
+    <!-- Certificate -->
+    <record model="ir.ui.view" id="patient_certificate_tree">
+        <field name="name">Certificate Management</field>
+        <field name="model">certificate.management</field>
+        <field name="inherit_id" ref="acs_certification.view_certificate_management_tree" />
+        <field name="arch" type="xml">
+            <field name="user_id" position="attributes">
+                <attribute name="invisible">1</attribute> 
+                <attribute name="required">0</attribute> 
+            </field>
+            <field name="name" position="after">
+                <field name="patient_id"/>
+                <field name="physician_id"/>
+            </field>
+        </field>
+    </record>
+
+    <record model="ir.ui.view" id="patient_certificate_form">
+        <field name="name">Certificate Management</field>
+        <field name="model">certificate.management</field>
+        <field name="inherit_id" ref="acs_certification.view_certificate_management_form" />
+        <field name="arch" type="xml">
+            <field name="partner_id" position="attributes">
+                <attribute name="invisible">1</attribute> 
+                <attribute name="required">0</attribute> 
+            </field>
+            <field name="user_id" position="attributes">
+                <attribute name="invisible">1</attribute> 
+                <attribute name="required">0</attribute> 
+            </field>
+            <field name="tag_ids" position="before">
+                <field name="patient_id" required="1" readonly="state=='done'"/>
+                <field name="physician_id" required="1" readonly="state=='done'"/>
+                <field name="appointment_id" readonly="state=='done'" domain="[('patient_id','=', patient_id)]" context="{'default_patient_id': patient_id}"/>
+            </field>
+        </field>
+    </record>
+
+    <record model="ir.ui.view" id="patient_certificate_search">
+        <field name="name">Certificate Management</field>
+        <field name="model">certificate.management</field>
+        <field name="inherit_id" ref="acs_certification.view_certificate_management_search"/>
+        <field name="arch" type="xml">
+            <field name="name" position="after">
+                <field name="patient_id" />
+                <field name="physician_id"/>
+                <field name="appointment_id"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="view_certificate_pivot" model="ir.ui.view">
+        <field name="name">certificate.management.pivot</field>
+        <field name="model">certificate.management</field>
+        <field name="arch" type="xml">
+            <pivot string="Certificates">
+                <field name="date" type="row"/>
+                <field name="physician_id" type="row"/>
+                <field name="patient_id" type="row"/>
+            </pivot>
+        </field>
+    </record>
+
+</odoo>
+```
+
+  File: views/portal_template.xml
+  Content:
+```
+<odoo>
+
+    <!-- Portal View -->
+    <template id="portal_my_home_menu_hms" name="Portal layout : HMS Data" inherit_id="portal.portal_breadcrumbs" priority="20">
+        <xpath expr="//ol[hasclass('o_portal_submenu')]" position="inside">
+            <li t-if="page_name == 'certificate' or certificate" t-attf-class="breadcrumb-item #{'active ' if not certificate else ''}">
+                <a t-if="certificate" t-attf-href="/my/certificates?{{ keep_query() }}">Certificates</a>
+                <t t-else="">Certificates</t>
+            </li>
+            <li t-if="certificate" class="breadcrumb-item active">
+                <t t-esc="certificate.name"/>
+            </li>
+
+        </xpath>
+    </template>
+
+    <template id="portal_my_home" name="Certificates - Portal My Home" inherit_id="portal.portal_my_home" priority="30" customize_show="True">
+        <div id="portal_client_category" position="inside">
+            <t t-call="portal.portal_docs_entry">
+                <t t-set="icon" t-value="'/acs_hms_certification/static/description/certification.png'"/>
+                <t t-set="title">Certificates</t>
+                <t t-set="url" t-value="'/my/certificates'"/>
+                <t t-set="text">Review all your medical certificate</t>
+                <t t-set="placeholder_count" t-value="'certificate_count'"/>
+            </t>
+        </div>
+    </template>
+
+    <template id="my_certificates" name="My Certificates">
+        <t t-call="portal.portal_layout">
+
+            <t t-set="breadcrumbs_searchbar" t-value="True"/>
+
+            <t t-call="portal.portal_searchbar">
+                <t t-set="title">Certificate</t>
+            </t>
+            <t t-if="not certificates">
+                <p>There are currently no Certificates for your account.</p>
+            </t>
+
+            <div t-if="certificates" class="panel panel-default">
+                <div class="table-responsive">
+                    <table class="table table-hover bg-white status_table o_portal_my_doc_table">
+                        <thead>
+                            <tr class="active">
+                                <th>Name</th>
+                                <th>Physician</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+
+                        <t t-foreach="certificates" t-as="certificate">
+                            <tr>
+                                <td>
+                                    <a t-attf-href="/my/certificates/#{certificate.id}?{{ keep_query() }}"><t t-esc="certificate.name" /></a>
+                                </td>
+                                <td>
+                                    <span t-field="certificate.sudo().physician_id.name" />
+                                </td>
+                                <td>
+                                    <span t-field="certificate.date" />
+                                </td>
+                                <td>
+                                    <a class="btn btn-primary" target="_blank" title="Certificate"
+                                        t-att-href="'/report/pdf/acs_certification.certificate_report/'+str(certificate.id)">Print</a>
+                                </td>
+                            </tr>
+                        </t>
+                    </table>
+                </div>
+            </div>
+            <div t-if="pager" class="o_portal_pager text-center">
+                <t t-call="portal.pager"/>
+            </div>
+        </t>
+    </template>
+
+    <template id="my_certificate" name="My Certificate" >
+        <t t-call="portal.portal_layout">
+            <!-- Page Content -->
+            <div id="result_content" class="col-12 col-lg mt32">
+                <div class="o_portal_html_view shadow p-3" style="background-color: white;">
+                    <t t-call="acs_certification.certificate_report_document" t-lang="certificate.patient_id.partner_id.lang">
+                        <t t-set="doc" t-value="certificate.sudo()"/>
+                    </t>
+                </div>
+                <!-- chatter -->
+                <div id="certificate_communication" class="mt-4">
+                    <h2>History</h2>
+                    <t t-call="portal.message_thread">
+                        <t t-set="object" t-value="certificate"/>
+                    </t>
+                </div>
+            </div>
+        </t>
+    </template>
+
+</odoo>
+```
+
+  File: views/res_config_views.xml
+  Content:
+```
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+
+    <record id="res_config_settings_view_form" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.surgery</field>
+        <field name="model">res.config.settings</field>
+        <field name="priority" eval="10"/>
+        <field name="inherit_id" ref="acs_hms.res_config_settings_view_form" />
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='hospitalization']" position="before">
+                <block title="Certification" name="certification_setting_container">
+                    <setting help="Allow user to Autheticate certificate by scanning QrCode from report." id="acs_certificate_qrcode_setting">
+                        <field name="acs_certificate_qrcode" class="o_light_label" string="Certificate Authentication"/>
+                    </setting>
+                </block>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>
+```
+
+  File: views/template.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <template id="acs_certificate_details" name="Certificate Detail">
+        <t t-call="website.layout">
+            <div id="wrap">
+                <div class="container">
+                    <div id="certificate_content" class="col-12 col-lg mt32 mb64 o_portal_html_view shadow p-3" style="background-color: white;">
+                        <t t-call="acs_certification.certificate_report_document">
+                            <t t-set="doc" t-value="certificate.sudo()"/>
+                        </t>
+                    </div>
+                </div>
+            </div>
+        </t>
+    </template>
+
+</odoo>
+
+```
+
+Controllers:
+  File: controllers/__init__.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from . import main
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: controllers/main.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from odoo import http, fields, _
+from odoo.http import request
+from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT
+from odoo.exceptions import AccessError, MissingError
+from odoo.addons.portal.controllers.portal import CustomerPortal, pager as portal_pager, get_records_pager
+from odoo import fields as odoo_fields, http, tools, _, SUPERUSER_ID
+import base64
+
+class ACSHms(http.Controller):
+
+    @http.route(['/validate/certificatemanagement/<certificate_unique_code>'], type='http', auth="public", website=True, sitemap=False)
+    def certificate_details(self, certificate_unique_code, **post):
+        if certificate_unique_code:
+            certificate = request.env['certificate.management'].sudo().search([('unique_code','=',certificate_unique_code)], limit=1)
+            if certificate:
+                return request.render("acs_hms_certification.acs_certificate_details", {'certificate': certificate})
+        return request.render("acs_hms.acs_no_details")
+
+
+class HMSPortal(CustomerPortal):
+
+    def _prepare_home_portal_values(self, counters):
+        values = super()._prepare_home_portal_values(counters)
+        Certificate = request.env['certificate.management']
+        if 'certificate_count' in counters:
+            values['certificate_count'] = Certificate.search_count([]) \
+                if Certificate.check_access_rights('read', raise_exception=False) else 0
+        return values
+
+    @http.route(['/my/certificates', '/my/certificates/page/<int:page>'], type='http', auth="user", website=True, sitemap=False)
+    def my_certificates(self, page=1, sortby=None, **kw):
+        values = self._prepare_portal_layout_values()
+        Certificate = request.env['certificate.management']
+
+        if not sortby:
+            sortby = 'date'
+
+        sortings = {
+            'date': {'label': _('Newest'), 'order': 'date desc'},
+            'name': {'label': _('Name'), 'order': 'name'},
+        }
+        order = sortings.get(sortby, sortings['date'])['order']
+        count = Certificate.search_count([])
+
+        pager = portal_pager(
+            url="/my/certificates",
+            url_args={},
+            total=count,
+            page=page,
+            step=self._items_per_page
+        )
+        # content according to pager and archive selected
+        partner = request.env.user.partner_id.commercial_partner_id
+        certificates = request.env['certificate.management'].sudo().search([],
+            order=order, limit=self._items_per_page, offset=pager['offset'])
+
+        values.update({
+            'sortings': sortings,
+            'sortby': sortby,
+            'certificates': certificates,
+            'page_name': 'certificate',
+            'default_url': '/my/certificates',
+            'searchbar_sortings': sortings,
+            'pager': pager
+        })
+        return request.render("acs_hms_certification.my_certificates", values)
+
+    @http.route(['/my/certificates/<int:certificate_id>'], type='http', auth="user", website=True, sitemap=False)
+    def my_certificate(self, certificate_id=None, access_token=None, **kw):
+        try:
+            order_sudo = self._document_check_access('certificate.management', certificate_id, access_token=access_token)
+        except (AccessError, MissingError):
+            return request.redirect('/my')
+        return request.render("acs_hms_certification.my_certificate", {'certificate': order_sudo})
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+
+```
+
+Security:
+  File: security/security.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">
+
+        <record id ="acs_certification.group_certificate_manager" model="res.groups">
+            <field name="category_id" ref="acs_hms_base.module_category_hms_extra"/>
+            <field name="users" eval="[(4, ref('base.user_root')), (4, ref('base.user_admin'))]"/>
+        </record>
+
+    </data>
+
+    <data noupdate="1">
+
+        <record id="hms_certificate_portal_rule_1" model="ir.rule">
+            <field name="name">Portal Patient's Own Certificate</field>
+            <field name="model_id" ref="acs_certification.model_certificate_management"/>
+            <field name="domain_force">[('patient_id.partner_id','=',user.commercial_partner_id.id)]</field>
+            <field name="groups" eval="[(4, ref('base.group_portal'))]"/>
+            <field name="perm_unlink" eval="False"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_create" eval="False"/>
+        </record>
+
+    </data>
+
+</odoo>
+```
+
+I18n:
+  File: i18n/ar.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_certification
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 13.0+e\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2019-11-02 10:09+0000\n"
+"PO-Revision-Date: 2019-11-02 10:09+0000\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: \n"
+"Plural-Forms: \n"
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_certificate_management
+msgid "Certificate Management"
+msgstr ""
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.view_certificate_pivot
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.view_hms_patient_certificate_form
+msgid "Certificates"
+msgstr ""
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__physician_id
+msgid "Doctor"
+msgstr ""
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,help:acs_hms_certification.field_certificate_management__physician_id
+msgid "Doctor ho provided certificate with the patient"
+msgstr ""
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_hms_patient
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__patient_id
+msgid "Patient"
+msgstr "المريض"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,help:acs_hms_certification.field_certificate_management__patient_id
+msgid "Patient whose certificate to be attached"
+msgstr ""
+
+```
+
+  File: i18n/es.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_certification
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 14.0-20210330\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-04-09 02:11+0000\n"
+"PO-Revision-Date: 2021-04-08 21:14-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 2.4.2\n"
+"Last-Translator: \n"
+"Language: es\n"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_appointment__certificate_count
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_patient__certificate_count
+msgid "# Certificates"
+msgstr "# Certificados"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__access_warning
+msgid "Access warning"
+msgstr "Advertencia de acceso"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.res_config_settings_view_form
+msgid "Allow user to Autheticate certificate by scanning QrCode from report."
+msgstr "Permitir al usuario autenticar la prescripción por Scan de código Qr desde el reporte."
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_hms_appointment
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__appointment_id
+msgid "Appointment"
+msgstr "Cita"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "Certificate"
+msgstr "Certificado"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.res_config_settings_view_form
+msgid "Certificate Authentication"
+msgstr "Autenticación de certificados"
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_certificate_management
+msgid "Certificate Management"
+msgstr "Gestión de Certificados"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_appointment__certificate_ids
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_patient__certificate_ids
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.portal_my_home
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.portal_my_home_menu_hms
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.view_certificate_pivot
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.view_hms_appointment_form
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.view_hms_patient_certificate_form
+msgid "Certificates"
+msgstr "Certificados"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.res_config_settings_view_form
+msgid "Certification"
+msgstr "Certificación"
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_res_config_settings
+msgid "Config Settings"
+msgstr "Ajustes"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,help:acs_hms_certification.field_certificate_management__access_url
+msgid "Customer Portal URL"
+msgstr "URL para cliente"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "Date"
+msgstr "Fecha"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__display_name
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_appointment__display_name
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_patient__display_name
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_company__display_name
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_config_settings__display_name
+msgid "Display Name"
+msgstr "Nombre mostrado"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__physician_id
+msgid "Doctor"
+msgstr "Profesional"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,help:acs_hms_certification.field_certificate_management__physician_id
+msgid "Doctor who provided certificate to the patient"
+msgstr "Profesional que proporcionó certificado al paciente"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificate
+msgid "History"
+msgstr "Historia"
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_res_company
+msgid "Hospital"
+msgstr "Hospital"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__id
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_appointment__id
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_patient__id
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_company__id
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_config_settings__id
+msgid "ID"
+msgstr "ID (identificación)"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management____last_update
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_appointment____last_update
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_patient____last_update
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_company____last_update
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_config_settings____last_update
+msgid "Last Modified on"
+msgstr "Última modificación el"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.certificate_report_document
+msgid "Logo"
+msgstr "Logo"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "Name"
+msgstr "Nombre"
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_hms_patient
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__patient_id
+msgid "Patient"
+msgstr "Paciente"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,help:acs_hms_certification.field_certificate_management__appointment_id
+msgid "Patient Appointment"
+msgstr "Cita del paciente"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,help:acs_hms_certification.field_certificate_management__patient_id
+msgid "Patient whose certificate to be attached"
+msgstr "Paciente cuyo certificado se añadirá"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "Physician"
+msgstr "Médico"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__access_url
+msgid "Portal Access URL"
+msgstr "URL de acceso al portal"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "Print"
+msgstr "Imprimir"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_company__acs_certificate_qrcode
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_config_settings__acs_certificate_qrcode
+msgid "Print Authetication QrCode on Certificate"
+msgstr "Imprimir autenticación QrCode en el certificado"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__qr_image
+msgid "QR Code"
+msgstr "Código QR"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__access_token
+msgid "Security Token"
+msgstr "Token de seguridad"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "There are currently no Certificates for your account."
+msgstr "Actualmente no hay Certificados para su cuenta."
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__unique_code
+msgid "Unique UID"
+msgstr "UID único"
+
+```
+
+  File: i18n/es_EC.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_certification
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 14.0-20210330\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-04-09 02:11+0000\n"
+"PO-Revision-Date: 2021-04-08 21:14-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 2.4.2\n"
+"Last-Translator: \n"
+"Language: es_PA\n"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_appointment__certificate_count
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_patient__certificate_count
+msgid "# Certificates"
+msgstr "# Certificados"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__access_warning
+msgid "Access warning"
+msgstr "Advertencia de acceso"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.res_config_settings_view_form
+msgid "Allow user to Autheticate certificate by scanning QrCode from report."
+msgstr "Permitir al usuario autenticar la prescripción por Scan de código Qr desde el reporte."
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_hms_appointment
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__appointment_id
+msgid "Appointment"
+msgstr "Cita"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "Certificate"
+msgstr "Certificado"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.res_config_settings_view_form
+msgid "Certificate Authentication"
+msgstr "Autenticación de certificados"
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_certificate_management
+msgid "Certificate Management"
+msgstr "Gestión de Certificados"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_appointment__certificate_ids
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_patient__certificate_ids
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.portal_my_home
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.portal_my_home_menu_hms
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.view_certificate_pivot
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.view_hms_appointment_form
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.view_hms_patient_certificate_form
+msgid "Certificates"
+msgstr "Certificados"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.res_config_settings_view_form
+msgid "Certification"
+msgstr "Certificación"
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_res_config_settings
+msgid "Config Settings"
+msgstr "Ajustes"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,help:acs_hms_certification.field_certificate_management__access_url
+msgid "Customer Portal URL"
+msgstr "URL para cliente"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "Date"
+msgstr "Fecha"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__display_name
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_appointment__display_name
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_patient__display_name
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_company__display_name
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_config_settings__display_name
+msgid "Display Name"
+msgstr "Nombre mostrado"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__physician_id
+msgid "Doctor"
+msgstr "Profesional"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,help:acs_hms_certification.field_certificate_management__physician_id
+msgid "Doctor who provided certificate to the patient"
+msgstr "Profesional que proporcionó certificado al paciente"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificate
+msgid "History"
+msgstr "Historia"
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_res_company
+msgid "Hospital"
+msgstr "Hospital"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__id
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_appointment__id
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_patient__id
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_company__id
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_config_settings__id
+msgid "ID"
+msgstr "ID"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management____last_update
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_appointment____last_update
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_patient____last_update
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_company____last_update
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_config_settings____last_update
+msgid "Last Modified on"
+msgstr "Última modificación el"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.certificate_report_document
+msgid "Logo"
+msgstr "Logo"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "Name"
+msgstr "Nombre"
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_hms_patient
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__patient_id
+msgid "Patient"
+msgstr "Paciente"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,help:acs_hms_certification.field_certificate_management__appointment_id
+msgid "Patient Appointment"
+msgstr "Cita del paciente"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,help:acs_hms_certification.field_certificate_management__patient_id
+msgid "Patient whose certificate to be attached"
+msgstr "Paciente cuyo certificado se añadirá"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "Physician"
+msgstr "Profesional"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__access_url
+msgid "Portal Access URL"
+msgstr "URL de acceso al portal"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "Print"
+msgstr "Imprimir"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_company__acs_certificate_qrcode
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_config_settings__acs_certificate_qrcode
+msgid "Print Authetication QrCode on Certificate"
+msgstr "Imprimir autenticación QrCode en el certificado"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__qr_image
+msgid "QR Code"
+msgstr "Código QR"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__access_token
+msgid "Security Token"
+msgstr "Token de seguridad"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "There are currently no Certificates for your account."
+msgstr "Actualmente no hay Certificados para su cuenta."
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__unique_code
+msgid "Unique UID"
+msgstr "UID único"
+
+```
+
+  File: i18n/es_PA.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_certification
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 14.0-20210330\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-04-09 02:11+0000\n"
+"PO-Revision-Date: 2021-04-08 21:14-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 2.4.2\n"
+"Last-Translator: \n"
+"Language: es_PA\n"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_appointment__certificate_count
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_patient__certificate_count
+msgid "# Certificates"
+msgstr "# Certificados"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__access_warning
+msgid "Access warning"
+msgstr "Advertencia de acceso"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.res_config_settings_view_form
+msgid "Allow user to Autheticate certificate by scanning QrCode from report."
+msgstr "Permitir al usuario autenticar la prescripción por Scan de código Qr desde el reporte."
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_hms_appointment
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__appointment_id
+msgid "Appointment"
+msgstr "Cita"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "Certificate"
+msgstr "Certificado"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.res_config_settings_view_form
+msgid "Certificate Authentication"
+msgstr "Autenticación de certificados"
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_certificate_management
+msgid "Certificate Management"
+msgstr "Gestión de Certificados"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_appointment__certificate_ids
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_patient__certificate_ids
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.portal_my_home
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.portal_my_home_menu_hms
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.view_certificate_pivot
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.view_hms_appointment_form
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.view_hms_patient_certificate_form
+msgid "Certificates"
+msgstr "Certificados"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.res_config_settings_view_form
+msgid "Certification"
+msgstr "Certificación"
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_res_config_settings
+msgid "Config Settings"
+msgstr "Ajustes"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,help:acs_hms_certification.field_certificate_management__access_url
+msgid "Customer Portal URL"
+msgstr "URL para cliente"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "Date"
+msgstr "Fecha"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__display_name
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_appointment__display_name
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_patient__display_name
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_company__display_name
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_config_settings__display_name
+msgid "Display Name"
+msgstr "Nombre mostrado"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__physician_id
+msgid "Doctor"
+msgstr "Profesional"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,help:acs_hms_certification.field_certificate_management__physician_id
+msgid "Doctor who provided certificate to the patient"
+msgstr "Profesional que proporcionó certificado al paciente"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificate
+msgid "History"
+msgstr "Historia"
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_res_company
+msgid "Hospital"
+msgstr "Hospital"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__id
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_appointment__id
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_patient__id
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_company__id
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_config_settings__id
+msgid "ID"
+msgstr "ID"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management____last_update
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_appointment____last_update
+#: model:ir.model.fields,field_description:acs_hms_certification.field_hms_patient____last_update
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_company____last_update
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_config_settings____last_update
+msgid "Last Modified on"
+msgstr "Última modificación el"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.certificate_report_document
+msgid "Logo"
+msgstr "Logo"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "Name"
+msgstr "Nombre"
+
+#. module: acs_hms_certification
+#: model:ir.model,name:acs_hms_certification.model_hms_patient
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__patient_id
+msgid "Patient"
+msgstr "Paciente"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,help:acs_hms_certification.field_certificate_management__appointment_id
+msgid "Patient Appointment"
+msgstr "Cita del paciente"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,help:acs_hms_certification.field_certificate_management__patient_id
+msgid "Patient whose certificate to be attached"
+msgstr "Paciente cuyo certificado se añadirá"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "Physician"
+msgstr "Profesional"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__access_url
+msgid "Portal Access URL"
+msgstr "URL de acceso al portal"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "Print"
+msgstr "Imprimir"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_company__acs_certificate_qrcode
+#: model:ir.model.fields,field_description:acs_hms_certification.field_res_config_settings__acs_certificate_qrcode
+msgid "Print Authetication QrCode on Certificate"
+msgstr "Imprimir autenticación QrCode en el certificado"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__qr_image
+msgid "QR Code"
+msgstr "Código QR"
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__access_token
+msgid "Security Token"
+msgstr "Token de seguridad"
+
+#. module: acs_hms_certification
+#: model_terms:ir.ui.view,arch_db:acs_hms_certification.my_certificates
+msgid "There are currently no Certificates for your account."
+msgstr "Actualmente no hay Certificados para su cuenta."
+
+#. module: acs_hms_certification
+#: model:ir.model.fields,field_description:acs_hms_certification.field_certificate_management__unique_code
+msgid "Unique UID"
+msgstr "UID único"
+
+```
+
+Static:
+  File: static/description/index.html
+  Content:
+```
+<head>
+  <style>
+      .backgrounds{background-color:#fff; color:#0B80E6}
+  </style>
+</head>
+
+<section class="oe_container">
+    <div class="mt32 mb32">
+        <div style="background-color: #2d9f9d; background-image: linear-gradient(#918c8c, #2d9f9d); background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%); border-radius: 10px 10px 10px 10px; min-height: 160px;">
+            <div class="text-white font-weight-bold" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                <div class="pt-2 text-center">
+                    <span>
+                    <span class="pt-2 text-center" style="font-size:27px;">Almighty Consulting Solutions Pvt. Ltd.</span><br/>
+                </div>
+                <div class="row mt16">
+                    <div class="col-4 text-center">
+                        <span>Supported Editions</span><br/> 
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Community 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Enterprise 
+                        </span>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <a href="https://www.almightycs.com" target="_blank">
+                            <img src="almightycs.png" width="80" height="auto">
+                        </a>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <span>Supported Hostings <br/></span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Odoo.sh 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Cloud
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>On Premise 
+                        </span><br/>
+                        <span class="pt-2 text-center" style="font-size:12px;">App can not be used on odoo online.</span><br/>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+ 
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12 oe_mt32 mb32">
+            <h3 class="oe_slogan">Hospital Certificate Management System</h3><h4><br/>This Module will Add functionality to provide certificate to Patients. Maintain history of certificate allocation. Normally Hospitals provide Birth, Fitness, Death, Blood Donation and many other type of certificates. To manages such Certification processwith proper history this module can be used.</h4>
+        </div>
+    </div> 
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced mb96">
+        <div class="oe_demo o_picture o_screenshot">
+            <a href="http://www.almightycs.com/blog/blogs-1/post/hospital-management-system-61" target="_blank">
+                <img src="acs_hms_certificate_form_odoo_almightycs.png">
+            </a>
+            <div class="oe_demo_footer oe_centeralign">Certificate Form View.</div>
+        </div>
+    </div> 
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced mt96 mb96">
+        <div class="oe_demo o_picture o_screenshot">
+            <a href="http://www.almightycs.com/blog/blogs-1/post/hospital-management-system-61" target="_blank">
+                <img src="acs_hms_certificate_template_odoo_almightycs.png">
+            </a>
+            <div class="oe_demo_footer oe_centeralign">Certificate Template.</div>
+        </div>
+    </div> 
+
+    <div class="oe_row oe_spaced mt96 mb96">
+        <div class="oe_demo o_picture o_screenshot">
+            <a href="http://www.almightycs.com/blog/blogs-1/post/hospital-management-system-61" target="_blank">
+                <img src="acs_hms_certificate_report_odoo_almightycs.png">
+            </a>
+            <div class="oe_demo_footer oe_centeralign">Certificate Report.</div>
+        </div>
+    </div>
+</section>
+
+<section>
+    <div class="oe_row oe_spaced mt96">
+        <h4 class="oe_slogan"><a href="http://www.almightycs.com">Almighty Consulting Solutions Pvt. Ltd.</a> </h4>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12">
+            <h3 class="oe_slogan">Other Configuration</h3>
+            <p class="oe_slogan">To use this module no technical knowledge is required. Just install module and functionality is ready to use. For more customization and help contact us.</p>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span6">
+            <div class="oe_demo o_picture o_screenshot">
+                <a href="https://www.almightycs.com" target="_blank">
+                    <img src="acs.png" width="200" height="auto">
+                </a>
+                <div class="oe_demo_footer oe_centeralign">Meet Us</div>
+            </div>
+        </div>
+        <div class="oe_span6">
+            <br/><br/>
+            <h2 class="oe_slogan">Do you need help?</h2>
+            <h3 class="oe_slogan">
+                Let's offer you the best services!
+            </h3>
+            <p class="oe_mt32 text-center">
+                Contact us by our official channels.
+            </p>
+            <p class="oe_mt32 text-center">
+                Skype: turkesh4friends 
+            </p>
+            <div class="oe_spaced">
+                <ul class="text-center list-inline">
+                    <li>
+                        <a href="https://www.linkedin.com/organization-guest/company/almighty-consulting-services" Target="_blank"><i class="fa fa-linkedin-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://www.facebook.com/AlmightyCS.ERP" Target="_blank"><i class="fa fa-facebook-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://github.com/tpa-odoo" Target="_blank"><i class="fa fa-github-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="mailto:info@almightycs.com" Target="_blank"><i class="fa fa-envelope-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://twitter.com/_AlmightyCS" Target="_blank" ><i class="fa fa-twitter-square fa-xs backgrounds"></i></a>
+                    </li>
+
+                    <li>
+                        <a title="Contact us" data-toggle="tooltip" data-placement="left" Target="_blank" href="https://www.almightycs.com/contactus"><i class="fa fa-globe fa-xs backgrounds"></i></a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+<section class="oe_container">
+
+    <div data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: fixed;
+            bottom: 10px;
+            right: 20px;
+            z-index: 1000;
+            box-shadow: 1px 2px 11px rgba(0, 0, 0, 0.3), -5px 7px 12px rgba(0, 0, 0, 0.22);
+            cursor: pointer;">
+        <span class="fa fa-2x fa-handshake-o"></span>
+    </div>
+    
+    <div class="collapse show" id="contactus-floating" style="z-index: 1006; position: fixed; bottom: 10px; right: 20px;">
+        <div style="width:246px; overflow: hidden;">
+            <div class="text-center acs-contactus-close" data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+                    width: 25px;
+                    height: 25px;
+                    margin-bottom: -25px;
+                    display: flex;
+                    color: white;
+                    align-items: center;
+                    justify-content: center;
+                    position: relative;
+                    z-index: 1000;
+                    cursor: pointer;">
+                <i class="fa fa-times"></i>
+            </div>
+            <div class="acs-contactus-data" style="
+                    margin-top: -17px;
+                    background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+                    border-radius: 10px 10px 10px 10px;
+                    padding-bottom: 10px;
+                    height: 106px;">
+                <div class="text-center" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                    <span class="pt-2 text-white font-weight-bold" style="">Contact AlmightyCS</span>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; font-size: 14px;">  
+                    <a href="skype:turkesh4friends" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-skype" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Skype</span>
+                    </a>
+                    <a href="https://www.almightycs.com" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-globe fa-spin" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Website</span>
+                    </a>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; 
+                    font-size: 14px; 
+                    padding-bottom: 20px; 
+                    padding-top: 22px;"> 
+                    <a href="mailto:info@almightycs.com" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-envelope" style="font-size: 19px;"></i>
+                        <span class="pt-2 font-weight-bold">Email</span>
+                    </a>
+                    <a href="https://www.almightycs.com/contactus" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-handshake-o" style="font-size: 20px;"></i>
+                        <span class="pt-2 font-weight-bold">Contactus</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div> 
+
+</section>
+```
+
+Doc:
+  File: doc/changelog.rst
+  Content:
+```
+`1.0.1                                                        [03/10/2023]`
+***************************************************************************
+- Launched Module for v17
+```
+
+Other_files:
+  File: report/certificate_report.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <template id="certificate_report_document" inherit_id="acs_certification.certificate_report_document">
+        <xpath expr="//t[@t-if='doc.print_header_in_report']" position="after">
+            <div class="row" t-if="doc.sudo().company_id.acs_certificate_qrcode">
+                <div class="col-12 pull-right">
+                    <img t-if="doc.qr_image" t-att-src="image_data_uri(doc.qr_image)" alt="Logo" style="width: 100px;height: 100px" class="float-end"/>
+                </div>
+            </div>
+        </xpath>
+    </template>
+
+</odoo>
+```
+

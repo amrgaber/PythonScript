@@ -1,0 +1,856 @@
+Addon: acs_hms_insurance_hospitalization
+
+Manifest: __manifest__.py
+Content:
+```python
+# -*- coding: utf-8 -*-
+#╔══════════════════════════════════════════════════════════════════════╗
+#║                                                                      ║
+#║                  ╔═══╦╗       ╔╗  ╔╗     ╔═══╦═══╗                   ║
+#║                  ║╔═╗║║       ║║ ╔╝╚╗    ║╔═╗║╔═╗║                   ║
+#║                  ║║ ║║║╔╗╔╦╦══╣╚═╬╗╔╬╗ ╔╗║║ ╚╣╚══╗                   ║
+#║                  ║╚═╝║║║╚╝╠╣╔╗║╔╗║║║║║ ║║║║ ╔╬══╗║                   ║
+#║                  ║╔═╗║╚╣║║║║╚╝║║║║║╚╣╚═╝║║╚═╝║╚═╝║                   ║
+#║                  ╚╝ ╚╩═╩╩╩╩╩═╗╠╝╚╝╚═╩═╗╔╝╚═══╩═══╝                   ║
+#║                            ╔═╝║     ╔═╝║                             ║
+#║                            ╚══╝     ╚══╝                             ║
+#║                  SOFTWARE DEVELOPED AND SUPPORTED BY                 ║
+#║                ALMIGHTY CONSULTING SOLUTIONS PVT. LTD.               ║
+#║                      COPYRIGHT (C) 2016 - TODAY                      ║
+#║                      https://www.almightycs.com                      ║
+#║                                                                      ║
+#╚══════════════════════════════════════════════════════════════════════╝
+{
+    'name': 'Hospitalization Insurance Management System',
+    'summary': 'Patient Insurance Management for Hospitalization and related Claims',
+    'description': """
+        Patient Insurance Management for Hospitalization and related Claims. Hospital Management with Insurance Claim. ACS HMS
+    """,
+    'category': 'Medical',
+    'version': '1.0.1',
+    'author': 'Almighty Consulting Solutions Pvt. Ltd.',
+    'website': 'https://www.almightycs.com',
+    'license': 'OPL-1',
+    'depends': ['acs_hms_hospitalization', 'acs_hms_insurance'],
+    'data': [
+        'security/ir.model.access.csv',
+        'report/claim_report.xml',
+        'views/hms_base_view.xml',
+        'views/claim_view.xml',
+    ],
+    'images': [
+        'static/description/hms_insuranceacs_almightycs_odoo_cover.jpg',
+    ],
+    'installable': True,
+    'application': True,
+    'sequence': 3,
+    'price': 11,
+    'currency': 'USD',
+}
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+__init__.py:
+Content:
+```python
+# -*- coding: utf-8 -*-
+
+from . import models
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+Models:
+  File: models/__init__.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from . import insurance
+from . import hms_base
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: models/hms_base.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+from datetime import datetime
+from odoo import api, fields, models, _
+from odoo.exceptions import ValidationError, AccessError, UserError, RedirectWarning
+
+
+class Attachments(models.Model):
+    _inherit = "ir.attachment"
+
+    hospitalization_id = fields.Many2one('acs.hospitalization', 'Hospitalization')
+
+
+class AcsHmsPackage(models.Model):
+    _inherit = "acs.hms.package"
+
+    def _claim_count(self):
+        for rec in self:
+            rec.claim_count = self.env['hms.insurance.claim'].search_count([('package_id', '=', rec.id)])
+
+    claim_count = fields.Integer(string='# of Claims', compute='_claim_count', readonly=True)
+    claim_ids = fields.One2many("hms.insurance.claim", "package_id", string='Claims', copy=False)
+
+    def action_view_claims(self):
+        action = self.env["ir.actions.actions"]._for_xml_id("acs_hms_insurance.action_insurance_claim")
+        action['domain'] = [('id','in',self.claim_ids.ids)]
+        return action
+
+
+class Hospitalization(models.Model):
+    _inherit = 'acs.hospitalization'
+
+    def _rec_count(self):
+        super(Hospitalization, self)._rec_count()
+        for rec in self:
+            rec.claim_count = len(rec.claim_ids)
+
+    cashless = fields.Boolean(string="Cashless")
+    package_id = fields.Many2one('acs.hms.package', string='Package')
+    package_invoice_id = fields.Many2one('account.move', string="Package Invoice")
+    claim_ids = fields.One2many('hms.insurance.claim','hospitalization_id', "Claims")
+    claim_count = fields.Integer(compute='_rec_count', string='# Claims')
+
+    def action_patient_doc_view(self):
+        action = self.env["ir.actions.actions"]._for_xml_id("base.action_attachment")
+        action['domain'] = [('res_id', '=', self.patient_id.id), ('res_model', '=', 'hms.patient')]
+        action['context'] = {
+            'default_res_id': self.patient_id.id,
+            'default_res_model': 'hms.patient',
+            'default_patient_id': self.patient_id.id,
+            'default_hospitalization_id': self.id,
+            'default_is_document': True}
+        return action
+
+    def action_claim_view(self):
+        action = self.env["ir.actions.actions"]._for_xml_id("acs_hms_insurance.action_insurance_claim")
+        action['domain'] = [('patient_id', '=', self.patient_id.id),('hospitalization_id','=',self.id)]
+        action['context'] = {
+            'default_patient_id': self.patient_id.id,
+            'default_hospitalization_id': self.id
+        }
+        return action
+
+    def action_create_invoice(self):
+        invoice_id = super(Hospitalization, self).action_create_invoice()
+        return invoice_id
+
+    def create_package_invoice(self):
+        if not self.package_id:
+            raise UserError(('Please select package first.'))
+
+        product_data = []
+        for line in self.package_id.order_line:
+            if line.display_type:
+                product_data.append({
+                    'name': line.name,
+                })
+            else:
+                product_data.append({
+                    'product_id': line.product_id,
+                    'name': line.name,
+                    'price_unit': line.price_unit,
+                    'quantity': line.product_uom_qty,
+                    'discount': line.discount,
+                })
+
+        invoice = self.acs_create_invoice(partner=self.patient_id.partner_id, patient=self.patient_id, product_data=product_data, inv_data={})
+        invoice.write({
+            'claim_id': self.claim_ids and self.claim_ids[0].id or False,
+            'hospitalization_id': self.id
+        })
+        self.package_invoice_id = invoice.id
+
+
+```
+
+  File: models/insurance.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+from datetime import datetime
+from odoo import api, fields, models, _
+from odoo.exceptions import ValidationError, AccessError, UserError, RedirectWarning
+
+
+class InsuranceClaim(models.Model):
+    _inherit = 'hms.insurance.claim'
+
+    hospitalization_id = fields.Many2one('acs.hospitalization', 'Hospitalization')
+    claim_for = fields.Selection(selection_add=[('hospitalization', 'Hospitalization')])
+    package_id = fields.Many2one('acs.hms.package', string='Package')
+    
+    
+    @api.onchange('package_id')
+    def onchange_package_id(self):
+        if self.package_id:
+            self.amount_requested = self.package_id.amount_total
+
+    @api.onchange('hospitalization_id')
+    def onchange_hospitalization(self):
+        if self.hospitalization_id and self.hospitalization_id.package_id:
+            self.package_id = self.hospitalization_id.package_id.id
+
+    def get_relate_invoices(self):
+        invoices = super(InsuranceClaim, self).get_relate_invoices()
+        if self.claim_for=='hospitalization':
+            invoices = self.env['account.move'].search([('hospitalization_id', '=', self.hospitalization_id.id)])
+        return invoices
+
+```
+
+Views:
+  File: views/claim_view.xml
+  Content:
+```
+<?xml version="1.0"?>
+<odoo>
+    
+    <record id="acs_hms_package_form_view" model="ir.ui.view">
+        <field name="name">acs.hms.package.form</field>
+        <field name="model">acs.hms.package</field>
+        <field name="inherit_id" ref="acs_hms_surgery.acs_hms_package_form_view"/>
+        <field name="arch" type="xml">
+            <div name="button_box" position="inside">
+                <button name="action_view_claims"
+                    type="object"
+                    class="oe_stat_button"
+                    icon="fa-pencil-square-o" invisible="claim_count == 0"
+                    >
+                    <field name="claim_count" widget="statinfo" string="Claims"/>
+                </button>
+            </div>
+        </field>
+    </record>
+
+    <!-- Claim View -->
+    <record id="view_claim_tree" model="ir.ui.view">
+        <field name="name">insurance.claim.tree</field>
+        <field name="model">hms.insurance.claim</field>
+        <field name="inherit_id" ref="acs_hms_insurance.view_claim_tree"/>
+        <field name="arch" type="xml">
+            <field name="appointment_id" position="before">
+                <field name="hospitalization_id"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="view_insurance_claim_form" model="ir.ui.view">
+        <field name="name">hms.insurance.claim.form</field>
+        <field name="model">hms.insurance.claim</field>
+        <field name="inherit_id" ref="acs_hms_insurance.view_insurance_claim_form"/>
+        <field name="arch" type="xml">
+            <field name="claim_for" position="after">
+                <field name="hospitalization_id" domain="[('patient_id', '=', patient_id)]" options="{'no_create': True}" invisible="claim_for!='hospitalization'" required="claim_for!='hospitalization'" readonly="state in ('cancel','done')"/>
+            </field>
+            <field name="currency_id" position="before">
+                <field name="package_id" options="{'no_create': True}" readonly="state in ('cancel','done')"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="view_acs_insurance_claim_calendar" model="ir.ui.view">
+        <field name="name">hms.insurance.claim.calendar</field>
+        <field name="model">hms.insurance.claim</field>
+        <field name="inherit_id" ref="acs_hms_insurance.view_acs_insurance_claim_calendar"/>
+        <field name="type">calendar</field>
+        <field name="arch" type="xml">
+            <field name="appointment_id" position="before">
+                <field name="hospitalization_id"/>
+            </field>
+        </field>
+    </record>
+
+</odoo>
+```
+
+  File: views/hms_base_view.xml
+  Content:
+```
+<?xml version="1.0"?>
+<odoo>
+
+    <!-- Hospitalization -->
+    <record id="view_acs_hospitalization_form" model="ir.ui.view">
+        <field name="name">view.hospitalization.claim.form</field>
+        <field name="model">acs.hospitalization</field>
+        <field name="inherit_id" ref="acs_hms_hospitalization.view_acs_hospitalization_form"/>
+        <field name="arch" type="xml">
+            <button name="action_create_invoice" position="after">
+                <button name="create_package_invoice" type="object" string="Create Package Bill/Invoice" groups="account.group_account_invoice" invisible="not package_id or package_invoice_id or state!='discharged'"/>
+                <field name="package_invoice_id" invisible="1" readonly="state in ('cancel','done')"/>
+            </button>
+            <div name="button_box" position="inside">
+                <button name="action_claim_view" type="object" class="oe_stat_button" icon="fa-pencil-square-o" groups="acs_hms_insurance.group_hms_insurance_officer" >
+                    <field string="Claims" name="claim_count" widget="statinfo"/>
+                </button>
+                <button name="action_patient_doc_view" string="Patient Doc" type="object" class="oe_stat_button" icon="fa-pencil-square-o"/>
+            </div>
+            <xpath expr="//field[@name='relative_number']" position="after">
+                <field name="cashless" readonly="state in ('cancel','done')"/>
+                <field name="package_id" readonly="state in ('cancel','done')"/>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>
+```
+
+I18n:
+  File: i18n/es.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_insurance_hospitalization
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 14.0+e\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-01-29 06:52+0000\n"
+"PO-Revision-Date: 2021-04-09 03:21-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 2.4.2\n"
+"Last-Translator: \n"
+"Language: es\n"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__claim_count
+msgid "# Claims"
+msgstr "# Reclamaciones"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model,name:acs_hms_insurance_hospitalization.model_ir_attachment
+msgid "Attachment"
+msgstr "Adjunto"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__cashless
+msgid "Cashless"
+msgstr "Dinero electrónico"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model,name:acs_hms_insurance_hospitalization.model_hms_insurance_claim
+msgid "Claim"
+msgstr "Reclamación"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_hms_insurance_claim__claim_for
+msgid "Claim Type"
+msgstr "Tipo de reclamación"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__claim_ids
+#: model_terms:ir.ui.view,arch_db:acs_hms_insurance_hospitalization.view_acs_hospitalization_form
+msgid "Claims"
+msgstr "Reclamaciones"
+
+#. module: acs_hms_insurance_hospitalization
+#: model_terms:ir.ui.view,arch_db:acs_hms_insurance_hospitalization.view_acs_hospitalization_form
+msgid "Create Package Bill/Invoice"
+msgstr "Crear factura / factura de paquete"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__display_name
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_hms_insurance_claim__display_name
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_ir_attachment__display_name
+msgid "Display Name"
+msgstr "Nombre mostrado"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_hms_insurance_claim__hospitalization_id
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_ir_attachment__hospitalization_id
+#: model:ir.model.fields.selection,name:acs_hms_insurance_hospitalization.selection__hms_insurance_claim__claim_for__hospitalization
+msgid "Hospitalization"
+msgstr "Hospitalización"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__id
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_hms_insurance_claim__id
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_ir_attachment__id
+msgid "ID"
+msgstr "ID (identificación)"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization____last_update
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_hms_insurance_claim____last_update
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_ir_attachment____last_update
+msgid "Last Modified on"
+msgstr "Última modificación el"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__package_id
+msgid "Package"
+msgstr "Paquete"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__package_invoice_id
+msgid "Package Invoice"
+msgstr "Factura de paquete"
+
+#. module: acs_hms_insurance_hospitalization
+#: model_terms:ir.ui.view,arch_db:acs_hms_insurance_hospitalization.view_acs_hospitalization_form
+msgid "Patient Doc"
+msgstr "Doc. del paciente"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model,name:acs_hms_insurance_hospitalization.model_acs_hospitalization
+msgid "Patient Hospitalization"
+msgstr "Hospitalización del paciente"
+
+```
+
+  File: i18n/es_EC.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_insurance_hospitalization
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 15.0-20211110\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-11-22 22:46+0000\n"
+"PO-Revision-Date: 2021-11-22 17:51-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 3.0\n"
+"Last-Translator: \n"
+"Language: es_PA\n"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__claim_count
+msgid "# Claims"
+msgstr "# Reclamaciones"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model,name:acs_hms_insurance_hospitalization.model_ir_attachment
+msgid "Attachment"
+msgstr "Adjunto"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__cashless
+msgid "Cashless"
+msgstr "Sin efectivo"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model,name:acs_hms_insurance_hospitalization.model_hms_insurance_claim
+msgid "Claim"
+msgstr "Reclamación"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_hms_insurance_claim__claim_for
+msgid "Claim Type"
+msgstr "Tipo de reclamación"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__claim_ids
+#: model_terms:ir.ui.view,arch_db:acs_hms_insurance_hospitalization.view_acs_hospitalization_form
+msgid "Claims"
+msgstr "Reclamaciones"
+
+#. module: acs_hms_insurance_hospitalization
+#: model_terms:ir.ui.view,arch_db:acs_hms_insurance_hospitalization.view_acs_hospitalization_form
+msgid "Create Package Bill/Invoice"
+msgstr "Crear factura / factura de paquete"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_hms_insurance_claim__hospitalization_id
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_ir_attachment__hospitalization_id
+#: model:ir.model.fields.selection,name:acs_hms_insurance_hospitalization.selection__hms_insurance_claim__claim_for__hospitalization
+msgid "Hospitalization"
+msgstr "Hospitalización"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__package_id
+msgid "Package"
+msgstr "Paquete"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__package_invoice_id
+msgid "Package Invoice"
+msgstr "Factura del paquete"
+
+#. module: acs_hms_insurance_hospitalization
+#: model_terms:ir.ui.view,arch_db:acs_hms_insurance_hospitalization.view_acs_hospitalization_form
+msgid "Patient Doc"
+msgstr "Doc. del paciente"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model,name:acs_hms_insurance_hospitalization.model_acs_hospitalization
+msgid "Patient Hospitalization"
+msgstr "Hospitalización del paciente"
+
+```
+
+  File: i18n/es_PA.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_insurance_hospitalization
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 15.0-20211110\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-11-22 22:46+0000\n"
+"PO-Revision-Date: 2021-11-22 17:51-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 3.0\n"
+"Last-Translator: \n"
+"Language: es_PA\n"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__claim_count
+msgid "# Claims"
+msgstr "# Reclamaciones"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model,name:acs_hms_insurance_hospitalization.model_ir_attachment
+msgid "Attachment"
+msgstr "Adjunto"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__cashless
+msgid "Cashless"
+msgstr "Sin efectivo"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model,name:acs_hms_insurance_hospitalization.model_hms_insurance_claim
+msgid "Claim"
+msgstr "Reclamación"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_hms_insurance_claim__claim_for
+msgid "Claim Type"
+msgstr "Tipo de reclamación"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__claim_ids
+#: model_terms:ir.ui.view,arch_db:acs_hms_insurance_hospitalization.view_acs_hospitalization_form
+msgid "Claims"
+msgstr "Reclamaciones"
+
+#. module: acs_hms_insurance_hospitalization
+#: model_terms:ir.ui.view,arch_db:acs_hms_insurance_hospitalization.view_acs_hospitalization_form
+msgid "Create Package Bill/Invoice"
+msgstr "Crear factura / factura de paquete"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_hms_insurance_claim__hospitalization_id
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_ir_attachment__hospitalization_id
+#: model:ir.model.fields.selection,name:acs_hms_insurance_hospitalization.selection__hms_insurance_claim__claim_for__hospitalization
+msgid "Hospitalization"
+msgstr "Hospitalización"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__package_id
+msgid "Package"
+msgstr "Paquete"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model.fields,field_description:acs_hms_insurance_hospitalization.field_acs_hospitalization__package_invoice_id
+msgid "Package Invoice"
+msgstr "Factura del paquete"
+
+#. module: acs_hms_insurance_hospitalization
+#: model_terms:ir.ui.view,arch_db:acs_hms_insurance_hospitalization.view_acs_hospitalization_form
+msgid "Patient Doc"
+msgstr "Doc. del paciente"
+
+#. module: acs_hms_insurance_hospitalization
+#: model:ir.model,name:acs_hms_insurance_hospitalization.model_acs_hospitalization
+msgid "Patient Hospitalization"
+msgstr "Hospitalización del paciente"
+
+```
+
+Static:
+  File: static/description/index.html
+  Content:
+```
+<head>
+  <style>
+      .backgrounds{background-color:#fff; color:#0B80E6}
+  </style>
+</head>
+
+<section class="oe_container">
+    <div class="mt32 mb32">
+        <div style="background-color: #2d9f9d; background-image: linear-gradient(#918c8c, #2d9f9d); background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%); border-radius: 10px 10px 10px 10px; min-height: 160px;">
+            <div class="text-white font-weight-bold" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                <div class="pt-2 text-center">
+                    <span>
+                    <span class="pt-2 text-center" style="font-size:27px;">Almighty Consulting Solutions Pvt. Ltd.</span><br/>
+                </div>
+                <div class="row mt16">
+                    <div class="col-4 text-center">
+                        <span>Supported Editions</span><br/> 
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Community 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Enterprise 
+                        </span>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <a href="https://www.almightycs.com" target="_blank">
+                            <img src="almightycs.png" width="80" height="auto">
+                        </a>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <span>Supported Hostings <br/></span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Odoo.sh 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Cloud
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>On Premise 
+                        </span><br/>
+                        <span class="pt-2 text-center" style="font-size:12px;">App can not be used on odoo online.</span><br/>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+ 
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12 oe_mt32 mb32">
+            <h3 class="oe_slogan">Hospitalization Insurance Claim Management System</h3><h4><br/>This Module Adds Hospitalization Insurance Claim related features for inpatient treatment, care, surgery and invoicing.</h4>
+        </div>
+    </div> 
+</section>
+
+<section class="oe_container mt32 mb32">
+    <div class="oe_row oe_spaced">
+        <div class='oe_span12 mt92 alert alert-success'>
+            <h3 class="text-center"> 
+                <i class="fa fa-star fa-spin fa-2x fa-fw"></i>
+                What is special from other HMS applications 
+                <i class="fa fa-star fa-spin fa-2x fa-fw"></i>
+            </h3>
+            <hr/>
+            <h2><i class="fa fa-hand-o-right text-success"></i> Clean Code</h2>
+            <h2><i class="fa fa-hand-o-right text-success"></i> Proper User Roles</h2>
+            <h2><i class="fa fa-hand-o-right text-success"></i> Record Rules and Access rights</h2>
+            <h2><i class="fa fa-hand-o-right text-success"></i> Clean Form Views</h2>
+            <h2><i class="fa fa-hand-o-right text-success"></i> Many more supporting modules to complete flow</h2>
+        </div>
+    </div>
+</section>
+
+
+<section class="oe_mt32">
+    <div class='text-center mt92'>
+        <h2> Detailed Description of Module</h2>
+    </div>
+    <div class="panel-body">
+        <div class="alert alert-info">
+            <a data-toggle="collapse" href="#acs_insurance"><i class="fa fa-plus-circle"></i></a>
+            <b> Hospitalization Insurance Management</b>
+            <b style="float:right"><a href="http://www.almightycs.com" target="_blank">By ACS </b>
+        </div>
+        <div id="acs_insurance" class="panel-collapse out collapse show" class="oe_span12">
+            <h3><i class="fa fa-hand-o-right text-success"></i> All Insurance functionality from Insurance Module <a href="https://apps.odoo.com/apps/modules/16.0/acs_hms_insurance/"> Check it Here</a>.</h3>
+            <h3><i class="fa fa-hand-o-right text-success"></i> Hospitalization Invoicing Based on Package.</h3>
+            <h3><i class="fa fa-hand-o-right text-success"></i> Hospitalization Insurace configuration on insurance policy.</h3>
+        </div>
+    </div>
+</section>
+
+<section>
+    <div class="oe_row oe_spaced">
+        <h4 class="oe_slogan"><a href="http://www.almightycs.com">Almighty Consulting Solutions Pvt. Ltd.</a> </h4>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12">
+            <h3 class="oe_slogan">Other Configuration</h3>
+            <p class="oe_slogan">To use this module no technical knowledge is required. Just install module and functionality is ready to use. For more customization and help contact us.</p>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span6">
+            <div class="oe_demo o_picture o_screenshot">
+                <a href="https://www.almightycs.com" target="_blank">
+                    <img src="acs.png" width="200" height="auto">
+                </a>
+                <div class="oe_demo_footer oe_centeralign">Meet Us</div>
+            </div>
+        </div>
+        <div class="oe_span6">
+            <br/><br/>
+            <h2 class="oe_slogan">Do you need help?</h2>
+            <h3 class="oe_slogan">
+                Let's offer you the best services!
+            </h3>
+            <p class="oe_mt32 text-center">
+                Contact us by our official channels.
+            </p>
+            <p class="oe_mt32 text-center">
+                Skype: turkesh4friends 
+            </p>
+            <div class="oe_spaced">
+                <ul class="text-center list-inline">
+                    <li>
+                        <a href="https://www.linkedin.com/organization-guest/company/almighty-consulting-services" Target="_blank"><i class="fa fa-linkedin-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://www.facebook.com/AlmightyCS.ERP" Target="_blank"><i class="fa fa-facebook-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://github.com/tpa-odoo" Target="_blank"><i class="fa fa-github-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="mailto:info@almightycs.com" Target="_blank"><i class="fa fa-envelope-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://twitter.com/_AlmightyCS" Target="_blank" ><i class="fa fa-twitter-square fa-xs backgrounds"></i></a>
+                    </li>
+
+                    <li>
+                        <a title="Contact us" data-toggle="tooltip" data-placement="left" Target="_blank" href="https://www.almightycs.com/contactus"><i class="fa fa-globe fa-xs backgrounds"></i></a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+<section class="oe_container">
+
+    <div data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: fixed;
+            bottom: 10px;
+            right: 20px;
+            z-index: 1000;
+            box-shadow: 1px 2px 11px rgba(0, 0, 0, 0.3), -5px 7px 12px rgba(0, 0, 0, 0.22);
+            cursor: pointer;">
+        <span class="fa fa-2x fa-handshake-o"></span>
+    </div>
+    
+    <div class="collapse show" id="contactus-floating" style="z-index: 1006; position: fixed; bottom: 10px; right: 20px;">
+        <div style="width:246px; overflow: hidden;">
+            <div class="text-center acs-contactus-close" data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+                    width: 25px;
+                    height: 25px;
+                    margin-bottom: -25px;
+                    display: flex;
+                    color: white;
+                    align-items: center;
+                    justify-content: center;
+                    position: relative;
+                    z-index: 1000;
+                    cursor: pointer;">
+                <i class="fa fa-times"></i>
+            </div>
+            <div class="acs-contactus-data" style="
+                    margin-top: -17px;
+                    background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+                    border-radius: 10px 10px 10px 10px;
+                    padding-bottom: 10px;
+                    height: 106px;">
+                <div class="text-center" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                    <span class="pt-2 text-white font-weight-bold" style="">Contact AlmightyCS</span>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; font-size: 14px;">  
+                    <a href="skype:turkesh4friends" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-skype" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Skype</span>
+                    </a>
+                    <a href="https://www.almightycs.com" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-globe fa-spin" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Website</span>
+                    </a>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; 
+                    font-size: 14px; 
+                    padding-bottom: 20px; 
+                    padding-top: 22px;"> 
+                    <a href="mailto:info@almightycs.com" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-envelope" style="font-size: 19px;"></i>
+                        <span class="pt-2 font-weight-bold">Email</span>
+                    </a>
+                    <a href="https://www.almightycs.com/contactus" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-handshake-o" style="font-size: 20px;"></i>
+                        <span class="pt-2 font-weight-bold">Contactus</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div> 
+
+</section>
+```
+
+Doc:
+  File: doc/changelog.rst
+  Content:
+```
+`1.0.1                                                        [12/10/2023]`
+***************************************************************************
+- Launched Module for v17
+```
+
+Other_files:
+  File: report/claim_report.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <template id="claim_report_document" inherit_id="acs_hms_insurance.claim_report_document">
+        <xpath expr="//td[@name='td_tpa']" position="after">
+            <td>
+                <strong>Package:</strong>
+            </td>
+            <td>
+                <span t-field="doc.package_id"/>
+            </td>
+        </xpath>
+    </template>
+
+</odoo>
+
+```
+

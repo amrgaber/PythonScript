@@ -1,0 +1,835 @@
+1. Read the README file to gain an overview of the project, its goals, and any setup instructions.
+
+2. Examine the repository structure to understand how the files and directories are organized.
+
+3. Identify the main entry point of the application (e.g., main.py, app.py, index.js) and start analyzing the code flow from there.
+
+4. Study the dependencies and libraries used in the project to understand the external tools and frameworks being utilized.
+
+5. Analyze the core functionality of the project by examining the key modules, classes, and functions.
+
+6. Look for any configuration files (e.g., config.py, .env) to understand how the project is configured and what settings are available.
+
+7. Investigate any tests or test directories to see how the project ensures code quality and handles different scenarios.
+
+8. Review any documentation or inline comments to gather insights into the codebase and its intended behavior.
+
+9. Identify any potential areas for improvement, optimization, or further exploration based on your analysis.
+
+10. Provide a summary of your findings, including the project's purpose, key features, and any notable observations or recommendations.
+
+Use the files and contents provided below to complete this analysis:
+
+Addon: acs_document_base
+
+Manifest: __manifest__.py
+Content:
+```python
+# -*- coding: utf-8 -*-
+#╔══════════════════════════════════════════════════════════════════════╗
+#║                                                                      ║
+#║                  ╔═══╦╗       ╔╗  ╔╗     ╔═══╦═══╗                   ║
+#║                  ║╔═╗║║       ║║ ╔╝╚╗    ║╔═╗║╔═╗║                   ║
+#║                  ║║ ║║║╔╗╔╦╦══╣╚═╬╗╔╬╗ ╔╗║║ ╚╣╚══╗                   ║
+#║                  ║╚═╝║║║╚╝╠╣╔╗║╔╗║║║║║ ║║║║ ╔╬══╗║                   ║
+#║                  ║╔═╗║╚╣║║║║╚╝║║║║║╚╣╚═╝║║╚═╝║╚═╝║                   ║
+#║                  ╚╝ ╚╩═╩╩╩╩╩═╗╠╝╚╝╚═╩═╗╔╝╚═══╩═══╝                   ║
+#║                            ╔═╝║     ╔═╝║                             ║
+#║                            ╚══╝     ╚══╝                             ║
+#║                  SOFTWARE DEVELOPED AND SUPPORTED BY                 ║
+#║                ALMIGHTY CONSULTING SOLUTIONS PVT. LTD.               ║
+#║                      COPYRIGHT (C) 2016 - TODAY                      ║
+#║                      https://www.almightycs.com                      ║
+#║                                                                      ║
+#╚══════════════════════════════════════════════════════════════════════╝
+{
+    'name': 'Document Management Base',
+    'summary': 'Manage Documents at single place or see all related documents directly.',
+    'description': """Manage Documents at single place or see all related documents directly on patint.
+    Patient Document Management System. hospital management medical management ACS HMS
+    """,
+    'version': '1.0.1',
+    'category': 'Medical',
+    'author': 'Almighty Consulting Solutions Pvt. Ltd.',
+    'support': 'info@almightycs.com',
+    'website': 'https://www.almightycs.com',
+    'license': 'OPL-1',
+    'depends': ['mail', 'hr'],
+    'data': [
+        'security/security.xml',
+        'security/ir.model.access.csv',
+        'view/document_view.xml',
+        'view/attachment_view.xml',
+        'view/menu_item.xml',
+    ],
+    'images': [
+        'static/description/document_management_system_almightycs_cover.jpg',
+    ],
+    'application': False,
+    'sequence': 2,
+    'price': 36,
+    'currency': 'USD',
+}
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+__init__.py:
+Content:
+```python
+# -*- encoding: utf-8 -*-
+
+from . import model
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+Security:
+  File: security/security.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+
+        <record model="ir.module.category" id="document_category">
+            <field name="name">Document Management System</field>
+            <field name="description">Manage your Company Documents.</field>
+            <field name="sequence">11</field>
+        </record>
+
+        <record id="group_document_user" model="res.groups">
+            <field name="name">User</field>
+            <field name="category_id" ref="document_category"/>
+        </record>
+
+        <record id="group_document_manager" model="res.groups">
+            <field name="name">Manager</field>
+            <field name="category_id" ref="document_category"/>
+            <field name="users" eval="[(4, ref('base.user_root')), (4, ref('base.user_admin'))]"/>
+            <field name="implied_ids" eval="[(4, ref('acs_document_base.group_document_user'))]"/>
+        </record>
+
+    </data>
+
+    <data noupdate="1">
+
+        <!--For Directory-->
+        <record model="ir.rule" id="document_directory_user_rule">
+            <field name="name">Document Directory: User</field>
+            <field name="model_id" ref="acs_document_base.model_document_directory"></field>
+            <field name="groups" eval="[(4,ref('group_document_user'))]"></field>
+            <field name="domain_force">['|', ('user_ids', 'in', [user.id]), ('department_id.member_ids', 'in', user.employee_ids.ids)]</field>
+            <field eval="0" name="perm_write"></field>
+            <field eval="1" name="perm_read"></field>
+            <field eval="0" name="perm_unlink"></field>
+            <field eval="0" name="perm_create"></field>
+        </record>
+
+        <record model="ir.rule" id="document_directory_manager_rule">
+            <field name="name">Document Directory: Manager</field>
+            <field name="model_id" ref="acs_document_base.model_document_directory"></field>
+            <field name="groups" eval="[(4,ref('group_document_manager'))]"></field>
+            <field name="domain_force">[]</field>
+            <field eval="1" name="perm_write"></field>
+            <field eval="1" name="perm_read"></field>
+            <field eval="1" name="perm_unlink"></field>
+            <field eval="1" name="perm_create"></field>
+        </record>
+
+        <!-- Documents -->
+        <record id="document_internal_user_rule" model="ir.rule" >
+            <field name="name">Document Internal: User</field>
+            <field name="model_id" ref="base.model_ir_attachment"></field>
+            <field name="groups" eval="[(4,ref('base.group_user'))]"></field>
+            <field name="domain_force">[('is_document', '=', False)]</field>
+        </record>
+
+        <record id="document_user_rule" model="ir.rule" >
+            <field name="name">Document: User</field>
+            <field name="model_id" ref="base.model_ir_attachment"></field>
+            <field name="groups" eval="[(4,ref('acs_document_base.group_document_user'))]"></field>
+            <field name="domain_force">['|','|',('create_uid','=',user.id),('directory_id.user_ids', 'in', [user.id]), ('directory_id.department_id.member_ids', 'in', user.employee_ids.ids)]</field>
+        </record>
+
+        <record id="attachment_user_rule" model="ir.rule" >
+            <field name="name">Attachment: User</field>
+            <field name="model_id" ref="base.model_ir_attachment"></field>
+            <field name="groups" eval="[(4,ref('acs_document_base.group_document_user'))]"></field>
+            <field name="domain_force">['|',('create_uid','=',user.id),('user_ids', 'in', [user.id])]</field>
+        </record>
+
+        <record id="document_manager_rule" model="ir.rule" >
+            <field name="name">Document: Manager</field>
+            <field name="model_id" ref="base.model_ir_attachment"></field>
+            <field name="groups" eval="[(4,ref('acs_document_base.group_document_manager'))]"></field>
+            <field name="domain_force">[]</field>
+        </record>
+
+    </data>
+</odoo>
+
+```
+
+Static:
+  File: static/description/acs.png
+  Content:
+```
+Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte
+```
+
+  File: static/description/almightycs.png
+  Content:
+```
+Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte
+```
+
+  File: static/description/icon.png
+  Content:
+```
+Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte
+```
+
+  File: static/description/index.html
+  Content:
+```
+<head>
+  <style>
+      .backgrounds{background-color:#fff; color:#0B80E6}
+  </style>
+</head>
+
+<section class="oe_container">
+    <div class="mt32 mb32">
+        <div style="background-color: #2d9f9d; background-image: linear-gradient(#918c8c, #2d9f9d); background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%); border-radius: 10px 10px 10px 10px; min-height: 160px;">
+            <div class="text-white font-weight-bold" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                <div class="pt-2 text-center">
+                    <span>
+                    <span class="pt-2 text-center" style="font-size:27px;">Almighty Consulting Solutions Pvt. Ltd.</span><br/>
+                </div>
+                <div class="row mt16">
+                    <div class="col-4 text-center">
+                        <span>Supported Editions</span><br/> 
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Community 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Enterprise 
+                        </span>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <a href="https://www.almightycs.com" target="_blank">
+                            <img src="almightycs.png" width="80" height="auto">
+                        </a>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <span>Supported Hostings <br/></span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Odoo.sh 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Cloud
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>On Premise 
+                        </span><br/>
+                        <span class="pt-2 text-center" style="font-size:12px;">App can not be used on odoo online.</span><br/>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+ 
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12 oe_mt32 mb32">
+            <h3 class="oe_slogan">Document Management System (Base)</h3>
+        </div>
+    </div> 
+</section>
+
+<section>
+    <div class="oe_row oe_spaced">
+        <h4 class="oe_slogan"><a href="http://www.almightycs.com">This Module is base module for document management. Not for separate sale.</a> </h4>
+    </div>
+</section>
+
+<section>
+    <div class="oe_row oe_spaced">
+        <h4 class="oe_slogan"><a href="http://www.almightycs.com">Almighty Consulting Solutions Pvt. Ltd.</a> </h4>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12">
+            <h3 class="oe_slogan">Other Configuration</h3>
+            <p class="oe_slogan">To use this module no technical knowledge is required. Just install module and functionality is ready to use. For more customization and help contact us.</p>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span6">
+            <div class="oe_demo o_picture o_screenshot">
+                <a href="https://www.almightycs.com" target="_blank">
+                    <img src="acs.png" width="200" height="auto">
+                </a>
+                <div class="oe_demo_footer oe_centeralign">Meet Us</div>
+            </div>
+        </div>
+        <div class="oe_span6">
+            <br/><br/>
+            <h2 class="oe_slogan">Do you need help?</h2>
+            <h3 class="oe_slogan">
+                Let's offer you the best services!
+            </h3>
+            <p class="oe_mt32 text-center">
+                Contact us by our official channels.
+            </p>
+            <p class="oe_mt32 text-center">
+                Skype: turkesh4friends 
+            </p>
+            <div class="oe_spaced">
+                <ul class="text-center list-inline">
+                    <li>
+                        <a href="https://www.linkedin.com/organization-guest/company/almighty-consulting-services" Target="_blank"><i class="fa fa-linkedin-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://www.facebook.com/AlmightyCS.ERP" Target="_blank"><i class="fa fa-facebook-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://github.com/tpa-odoo" Target="_blank"><i class="fa fa-github-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="mailto:info@almightycs.com" Target="_blank"><i class="fa fa-envelope-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://twitter.com/_AlmightyCS" Target="_blank" ><i class="fa fa-twitter-square fa-xs backgrounds"></i></a>
+                    </li>
+
+                    <li>
+                        <a title="Contact us" data-toggle="tooltip" data-placement="left" Target="_blank" href="https://www.almightycs.com/contactus"><i class="fa fa-globe fa-xs backgrounds"></i></a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+<section class="oe_container">
+
+    <div data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: fixed;
+            bottom: 10px;
+            right: 20px;
+            z-index: 1000;
+            box-shadow: 1px 2px 11px rgba(0, 0, 0, 0.3), -5px 7px 12px rgba(0, 0, 0, 0.22);
+            cursor: pointer;">
+        <span class="fa fa-2x fa-handshake-o"></span>
+    </div>
+    
+    <div class="collapse show" id="contactus-floating" style="z-index: 1006; position: fixed; bottom: 10px; right: 20px;">
+        <div style="width:246px; overflow: hidden;">
+            <div class="text-center acs-contactus-close" data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+                    width: 25px;
+                    height: 25px;
+                    margin-bottom: -25px;
+                    display: flex;
+                    color: white;
+                    align-items: center;
+                    justify-content: center;
+                    position: relative;
+                    z-index: 1000;
+                    cursor: pointer;">
+                <i class="fa fa-times"></i>
+            </div>
+            <div class="acs-contactus-data" style="
+                    margin-top: -17px;
+                    background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+                    border-radius: 10px 10px 10px 10px;
+                    padding-bottom: 10px;
+                    height: 106px;">
+                <div class="text-center" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                    <span class="pt-2 text-white font-weight-bold" style="">Contact AlmightyCS</span>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; font-size: 14px;">  
+                    <a href="skype:turkesh4friends" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-skype" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Skype</span>
+                    </a>
+                    <a href="https://www.almightycs.com" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-globe fa-spin" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Website</span>
+                    </a>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; 
+                    font-size: 14px; 
+                    padding-bottom: 20px; 
+                    padding-top: 22px;"> 
+                    <a href="mailto:info@almightycs.com" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-envelope" style="font-size: 19px;"></i>
+                        <span class="pt-2 font-weight-bold">Email</span>
+                    </a>
+                    <a href="https://www.almightycs.com/contactus" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-handshake-o" style="font-size: 20px;"></i>
+                        <span class="pt-2 font-weight-bold">Contactus</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div> 
+
+</section>
+```
+
+Doc:
+  File: doc/changelog.rst
+  Content:
+```
+`1.0.1                                                        [07/10/2023]`
+***************************************************************************
+- Migrated Module for v17
+```
+
+Other_files:
+  File: model/__init__.py
+  Content:
+```
+# -*- encoding: utf-8 -*-
+
+from . import document_directory
+from . import attachment
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: model/attachment.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from odoo import api, fields, models, _
+from odoo.exceptions import AccessError, ValidationError, MissingError, UserError
+from collections import defaultdict
+
+
+class Attachment(models.Model):
+    _inherit = "ir.attachment"
+
+    is_document = fields.Boolean("Is Document")
+    directory_id = fields.Many2one('document.directory', string='Directory', ondelete='restrict')
+    description = fields.Text(string='Description')
+    tag_ids = fields.Many2many('acs.document.tag', 'acs_attachment_document_tag_rel', 'document_id', 'tag_id', 
+        string='Tags', help="Classify and analyze your Document")
+    user_ids = fields.Many2many('res.users', 'attachment_user_rel', 'user_id', 'doc_id', string="Users")
+
+    #ACS: Allow to read Documents. Only by passs to read is_document is added as if condition.
+    @api.model
+    def check(self, mode, values=None):
+        """ Restricts the access to an ir.attachment, according to referred mode """
+        if self.env.is_superuser():
+            return True
+        # Always require an internal user (aka, employee) to access to a attachment
+        if not (self.env.is_admin() or self.env.user._is_internal()):
+            raise AccessError(_("Sorry, you are not allowed to access this document."))
+        # collect the records to check (by model)
+        model_ids = defaultdict(set)            # {model_name: set(ids)}
+        if self:
+            # DLE P173: `test_01_portal_attachment`
+            self.env['ir.attachment'].flush_model(['res_model', 'res_id', 'create_uid', 'public', 'res_field'])
+            self._cr.execute('SELECT res_model, res_id, create_uid, public, res_field, is_document FROM ir_attachment WHERE id IN %s', [tuple(self.ids)])
+            for res_model, res_id, create_uid, public, res_field, is_document in self._cr.fetchall():
+                if public and mode == 'read':
+                    continue
+                #ACS: THIS NEW CODE WAS ADDED
+                if is_document:
+                    continue
+                if not self.env.is_system() and (res_field or (not res_id and create_uid != self.env.uid)):
+                    raise AccessError(_("Sorry, you are not allowed to access this document."))
+                if not (res_model and res_id):
+                    continue
+                model_ids[res_model].add(res_id)
+        if values and values.get('res_model') and values.get('res_id'):
+            model_ids[values['res_model']].add(values['res_id'])
+
+        # check access rights on the records
+        for res_model, res_ids in model_ids.items():
+            # ignore attachments that are not attached to a resource anymore
+            # when checking access rights (resource was deleted but attachment
+            # was not)
+            if res_model not in self.env:
+                continue
+            if res_model == 'res.users' and len(res_ids) == 1 and self.env.uid == list(res_ids)[0]:
+                # by default a user cannot write on itself, despite the list of writeable fields
+                # e.g. in the case of a user inserting an image into his image signature
+                # we need to bypass this check which would needlessly throw us away
+                continue
+            records = self.env[res_model].browse(res_ids).exists()
+            # For related models, check if we can write to the model, as unlinking
+            # and creating attachments can be seen as an update to the model
+            access_mode = 'write' if mode in ('create', 'unlink') else mode
+            records.check_access_rights(access_mode)
+            records.check_access_rule(access_mode)
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: model/document_directory.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from odoo import api, fields, models, _
+from odoo.exceptions import AccessError, ValidationError, MissingError, UserError
+from odoo.osv.expression import AND, OR, FALSE_DOMAIN
+
+
+class DocumentDirectory(models.Model):
+    _name = "document.directory"
+    _description = "Document Directory"
+
+    def _get_attachment_count(self):
+        res = {}
+        AttachmentObj = self.env['ir.attachment']
+        for rec in self.sudo():
+            attchement_count = 0
+            domain = [('directory_id','=',rec.id)]
+            if rec.res_model and rec.res_model.name:
+                model_domain = [('res_model', '=', rec.res_model.model)]
+                domain = OR([domain,model_domain])
+            rec.attchement_count = AttachmentObj.search_count(domain)
+
+    name = fields.Char(required=True)
+    parent_id = fields.Many2one('document.directory',string='Parent Directory', index=True, ondelete='cascade')
+    children_ids = fields.One2many('document.directory', 'parent_id', string='Children', copy=True)
+    user_ids = fields.Many2many('res.users', 'document_user_rel', 'user_id', 'doc_id', string="Users")
+    description = fields.Text(string='Description')
+    tag_ids = fields.Many2many('acs.document.tag', 'directory_tag_rel', 'directory_id', 'tag_id', 
+        string='Tags', help="Classify and analyze your Document")
+    department_id = fields.Many2one('hr.department', string='Department', ondelete='restrict')
+    attchement_count = fields.Integer(compute='_get_attachment_count', string="Number of documents attached")
+    res_model = fields.Many2one('ir.model', 'Model', ondelete='cascade')
+
+    @api.constrains('res_model')
+    def _check_model(self):
+        if self.res_model:
+            directories = self.search([('id', '!=', self.id),('res_model', '=',self.res_model.id)])
+            if directories:
+                raise ValidationError(_('You can have only one directory for a model.'))
+     
+    def action_view_attachments(self):
+        self = self.sudo()
+        domain = [('directory_id','=',self.id)]
+        if self.res_model and self.res_model.name:
+            model_domain = [('res_model', '=', self.res_model.model)]
+            domain = OR([domain,model_domain])
+        attachments = self.env['ir.attachment'].search(domain)
+        action = self.env["ir.actions.actions"]._for_xml_id("base.action_attachment")
+        action['domain'] = [('id', 'in', attachments.ids)]
+        action['context'] = {
+                'default_res_model': self.res_model.model,
+                'default_directory_id': self.id,
+                'default_is_document': True}
+        return action
+
+    def _compute_display_name(self):
+        def acs_get_names(directory):
+            """ Return the list [cat.name, cat.parent_id.name, ...] """
+            res = []
+            while directory:
+                if directory.name:
+                    res.append(directory.name)
+                directory = directory.parent_id
+            return res
+        for rec in self:
+            rec.display_name = " / ".join(reversed(acs_get_names(rec)))
+
+    @api.constrains('parent_id')
+    def _check_directory_recursion(self):
+        if not self._check_recursion():
+            raise ValidationError(_('Error ! You cannot create recursive Directory.'))
+        return True
+
+
+class Tag(models.Model):
+    _name = "acs.document.tag"
+    _description = "Document Tags"
+
+    name = fields.Char('Name', required=True, translate=True)
+    color = fields.Integer('Color Index')
+
+    _sql_constraints = [
+        ('name_uniq', 'unique (name)', "Tag name already exists !"),
+    ]
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: view/attachment_view.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Attachment -->
+    <record id="view_document_document_form" model="ir.ui.view">
+        <field name="name">Document Form</field>
+        <field name="model">ir.attachment</field>
+        <field name="arch" type="xml">
+            <form string="Document View">
+                <sheet>
+                    <div class="oe_title">
+                        <label for="name" string="Name" class="oe_edit_only"/>
+                        <h1>
+                            <field name="name"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="is_document" invisible="1"/>
+                            <field name="datas" filename="name" colspan="2"/>
+                            <field name="user_ids" widget="many2many_tags" colspan="2"/>
+                            <field name="directory_id" colspan="2"/>
+                            <field name="tag_ids" widget="many2many_tags" colspan="2"/>
+                            <field name="res_model" colspan="2" invisible="1" force_save="1"/>
+                            <field name="res_id" colspan="2" invisible="1" force_save="1"/>
+                            <field name="type" colspan="2" invisible="1" force_save="1"/>
+                        </group>
+                        <field name="description" placeholder="Description" nolabel="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_document_image_tree" model="ir.ui.view">
+        <field name="name">Attachment Tree</field>
+        <field name="model">ir.attachment</field>
+        <field name="arch" type="xml">
+            <tree string="Document">
+                <field name="name"/>
+                <field name="directory_id"/>
+                <field name="res_model"/>
+                <field name="create_uid"/>
+                <field name="write_date"/>
+                <field name="description"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_attachment_search" model="ir.ui.view">
+        <field name="name">ir.attachment.inherit</field>
+        <field name="model">ir.attachment</field>
+        <field name="inherit_id" ref="base.view_attachment_search"/>
+        <field name="arch" type="xml">
+            <group position="after">
+                <searchpanel>
+                    <field name="directory_id" icon="fa-filter" limit="0"/>
+                </searchpanel>
+            </group>
+        </field>
+    </record>
+
+    <record id="action_ir_attachment" model="ir.actions.act_window">
+        <field name="name">Documents</field>
+        <field name="type">ir.actions.act_window</field>
+        <field name="res_model">ir.attachment</field>
+        <field name="view_mode">kanban,tree,form</field>
+        <field name="context">{'default_is_document': 1}</field>
+        <field name="view_ids" 
+           eval="[(5, 0, 0),
+                  (0, 0, {'view_mode': 'tree'}),
+                  (0, 0, {'view_mode': 'form', 'view_id': ref('view_document_document_form')}), 
+                  (0, 0, {'view_mode': 'kanban'})]"/>
+        <field name="domain">[('is_document','=',True),('res_model','not in',['','ir.ui.view','ir.ui.menu','im_livechat.channel'])]</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No Record Found
+            </p>
+            <p>
+                Click to add a Document.
+            </p>
+        </field>
+    </record>
+
+</odoo>
+```
+
+  File: view/document_view.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Directory tree view -->
+    <record id="view_document_directory_filter" model="ir.ui.view">
+        <field name="name">document.directory.search</field>
+        <field name="model">document.directory</field>
+        <field name="arch" type="xml">
+            <search string="Search Directory">
+                <field name="name"/>
+                <field name="description"/>
+                <field name="res_model"/>
+                <field name="tag_ids" string="Tag" filter_domain="[('tag_ids', 'ilike', self)]"/>
+                <separator/>
+                <group expand="0" string="Group By">
+                </group>
+                <searchpanel>
+                    <field name="parent_id" icon="fa-filter" limit="0"/>
+                </searchpanel>
+            </search>
+        </field>
+    </record>
+
+    <record id="document_directory_tree_view" model="ir.ui.view">
+        <field name="name">document.directory.tree</field>
+        <field name="model">document.directory</field>
+        <field name="priority">100</field>
+        <field name="arch" type="xml">
+            <tree string="Document Page">
+                <field name="name"/>
+                <field name="user_ids"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="document_directory_form_view" model="ir.ui.view">
+        <field name="name">document.directory.form</field>
+        <field name="model">document.directory</field>
+        <field name="arch" type="xml">
+            <form string="Document Directory">
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button  class="oe_stat_button" name="action_view_attachments"  type="object" icon="fa-files-o">
+                            <field string="Attachments" name="attchement_count" widget="statinfo"/>
+                        </button>
+                    </div>
+                    <div class="oe_title">
+                        <label for="name" string="Directory Name" class="oe_edit_only"/>
+                        <h1>
+                            <field name="name"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <field name="parent_id"/>
+                        <field name="department_id"/>
+                        <field name="res_model"/>
+                        <field name="user_ids" widget="many2many_tags"/>
+                        <field name="tag_ids" widget="many2many_tags" colspan="2"/>
+                    </group>
+                    <notebook>
+                        <page string="Description" name="description">
+                            <field name="description" placeholder="Description"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_document_directory" model="ir.actions.act_window">
+        <field name="name">Document Directory</field>
+        <field name="type">ir.actions.act_window</field>
+        <field name="res_model">document.directory</field>
+        <field name="view_mode">tree,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No Record Found
+            </p>
+            <p>
+                Click to add a Directory.
+            </p>
+        </field>
+    </record>
+
+    <record id="view_document_structure_tree" model="ir.ui.view">
+        <field name="name">document.structure.tree</field>
+        <field name="model">document.directory</field>
+        <field name="arch" type="xml">
+            <tree string="Directory Structure">
+                <field name="name"/>
+                <field name="res_model"/>
+            </tree>
+        </field>
+    </record>
+
+    <!-- acs.document.tag views -->
+    <record id="acs_document_tag_form" model="ir.ui.view">
+        <field name="name">acs.document.tag.form</field>
+        <field name="model">acs.document.tag</field>
+        <field name="arch" type="xml">
+            <form string="Document Tags">
+                <sheet>
+                    <group>
+                        <field name="name"/>
+                        <field name="color" groups="base.group_no_one"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record> 
+
+    <record id="acs_document_tag_tree" model="ir.ui.view">
+        <field name="name">acs.document.tag.tree</field>
+        <field name="model">acs.document.tag</field>
+        <field name="arch" type="xml">
+            <tree string="Document Tags">
+                <field name="name"/>
+                <field name="color" groups="base.group_no_one"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="action_acs_document_tag" model="ir.actions.act_window">
+        <field name="name">Document Tags</field>
+        <field name="res_model">acs.document.tag</field>
+        <field name="view_id" ref="acs_document_tag_tree"/>
+        <field name="help" type="html">
+          <p class="o_view_nocontent_smiling_face">
+            Click to define a new document tag.
+          </p><p>
+            Create specific tags that fit your company's activities
+            to better classify and analyse your documents.
+            Such categories could for instance reflect your document
+            structure or the different types of management you do.
+          </p>
+        </field>
+    </record>
+
+</odoo>
+```
+
+  File: view/menu_item.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Top menu item -->
+    <menuitem name="Documents" id="menu_main_document_management" groups="acs_document_base.group_document_user" web_icon="acs_document_base,static/description/icon.png" sequence="100"/>
+
+    <menuitem name="Documents" id="menu_document_document" parent="menu_main_document_management" sequence="20" action="action_ir_attachment"/>
+
+    <menuitem name="Directory" id="menu_document_directory" parent="menu_main_document_management" sequence="20" action="action_document_directory"/>
+
+    <menuitem name="Configuration" id="menu_document_configuration" parent="menu_main_document_management" groups="acs_document_base.group_document_manager"
+        sequence="25"/>
+
+    <menuitem name="Tags" id="menu_acs_document_tag" parent="menu_document_configuration" action="action_acs_document_tag"/>
+
+</odoo>
+```
+

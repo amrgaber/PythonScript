@@ -1,0 +1,536 @@
+Addon: save_translation_file
+
+Manifest: __manifest__.py
+Content:
+```python
+# -*- coding: utf-8 -*-
+# © 2016-TODAY Akretion
+# License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl.html).
+{
+    "name": "Save translation file",
+    "summary": "Allows developpers to easily generate i18n files",
+    "version": "10.0.1.0.0",
+    "category": "Tools",
+    "website": "https://www.akretion.com/",
+    "author": "Akretion, Odoo Community Association (OCA)",
+    "license": "AGPL-3",
+    "depends": [
+        "base",
+    ],
+    "data": [
+        "views/save_translation_file_view.xml",
+    ],
+    "application": False,
+    "installable": True,
+}
+
+```
+
+__init__.py:
+Content:
+```python
+# -*- coding: utf-8 -*-
+# © 2016-TODAY Akretion
+# License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl.html).
+from . import models
+
+```
+
+Models:
+  File: models/__init__.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+# © 2016-TODAY Akretion
+# License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl.html).
+from . import save_translation_file
+
+```
+
+  File: models/save_translation_file.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+# © 2016-TODAY Akretion
+# License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl.html).
+
+import os
+
+from odoo import models, api, tools
+from odoo.modules import get_module_path
+from odoo.tools.misc import get_iso_codes
+
+
+class IrModuleModule(models.Model):
+    _inherit = 'ir.module.module'
+
+    @api.one
+    def button_save_translation(self):
+
+        format_ = 'po'
+
+        i18n_path = os.path.join(get_module_path(self.name), 'i18n')
+        if not os.path.isdir(i18n_path):
+            os.mkdir(i18n_path)
+
+        lang_obj = self.env['res.lang']
+        condition = [('translatable', '=', True), ('code', '!=', 'en_US')]
+        langs = lang_obj.search(condition)
+
+        files = [('%s.pot' % self.name, False)]
+        for lang in langs:
+            iso_code = get_iso_codes(lang.code)
+            filename = '%s.%s' % (iso_code, format_)
+            files.append((filename, lang.code))
+
+        for filename, lang in files:
+            path = os.path.join(i18n_path, filename)
+            with open(path, 'w') as buf:
+                tools.trans_export(lang, [self.name], buf, format_,
+                                   self.env.cr)
+
+        return True
+
+```
+
+Views:
+  File: views/save_translation_file_view.xml
+  Content:
+```
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="module_form" model="ir.ui.view">
+        <field name="model">ir.module.module</field>
+        <field name="inherit_id" ref="base.module_form"/>
+        <field name="arch" type="xml">
+            <button name="button_install_cancel" position="after">
+                <button name="button_save_translation"
+                    string="Save translation file"
+                    confirm="Overwrite all i18n files for this module ?"
+                    type="object"
+                    states="installed"
+                    icon="terp-translate"
+                />
+            </button>
+        </field>
+    </record>
+    <record id="module_tree" model="ir.ui.view">
+        <field name="model">ir.module.module</field>
+        <field name="inherit_id" ref="base.module_tree"/>
+        <field name="arch" type="xml">
+            <field name="state" position="after">
+                <button name="button_save_translation"
+                    string="Save translation file"
+                    confirm="Overwrite all i18n files for this module ?"
+                    type="object"
+                    states="installed"
+                    icon="terp-translate"
+                />
+            </field>
+        </field>
+    </record>
+</odoo>
+
+```
+
+I18n:
+  File: i18n/de.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# * save_translation_file
+# 
+# Translators:
+# Ahmet Altinisik <aaltinisik@altinkaya.com.tr>, 2016
+# Armando Vulcano Junior <vulcano@uol.com.br>, 2015
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2012,2014
+# Jarmo Kortetjärvi <jarmo.kortetjarvi@gmail.com>, 2016
+# Matjaž Mozetič <m.mozetic@matmoz.si>, 2015
+# Paolo Valier, 2016
+# Pedro M. Baeza <pedro.baeza@gmail.com>, 2015
+# Rudolf Schnapka <rs@techno-flex.de>, 2016-2017
+# SaFi J. <safi2266@gmail.com>, 2015
+msgid ""
+msgstr ""
+"Project-Id-Version: server-tools (8.0)\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2017-03-07 03:47+0000\n"
+"PO-Revision-Date: 2017-03-05 11:13+0000\n"
+"Last-Translator: Rudolf Schnapka <rs@techno-flex.de>\n"
+"Language-Team: German (http://www.transifex.com/oca/OCA-server-tools-8-0/language/de/)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: \n"
+"Language: de\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#. module: save_translation_file
+#: model:ir.model,name:save_translation_file.model_ir_module_module
+msgid "Module"
+msgstr "Modul"
+
+#. module: save_translation_file
+#: view:ir.module.module:save_translation_file.module_form
+#: view:ir.module.module:save_translation_file.module_tree
+msgid "Overwrite all i18n files for this module ?"
+msgstr "Überschreibe alle i18n-Dateien für dieses Modul?"
+
+#. module: save_translation_file
+#: view:ir.module.module:save_translation_file.module_form
+#: view:ir.module.module:save_translation_file.module_tree
+msgid "Save translation file"
+msgstr "Speicher Übersetzungsdatei"
+
+```
+
+  File: i18n/es.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# * save_translation_file
+# 
+# Translators:
+msgid ""
+msgstr ""
+"Project-Id-Version: server-tools (8.0)\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2016-03-12 02:06+0000\n"
+"PO-Revision-Date: 2016-03-07 17:54+0000\n"
+"Last-Translator: <>\n"
+"Language-Team: Spanish (http://www.transifex.com/oca/OCA-server-tools-8-0/language/es/)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: \n"
+"Language: es\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#. module: save_translation_file
+#: model:ir.model,name:save_translation_file.model_ir_module_module
+msgid "Module"
+msgstr "Módulo"
+
+#. module: save_translation_file
+#: view:ir.module.module:save_translation_file.module_form
+#: view:ir.module.module:save_translation_file.module_tree
+msgid "Overwrite all i18n files for this module ?"
+msgstr ""
+
+#. module: save_translation_file
+#: view:ir.module.module:save_translation_file.module_form
+#: view:ir.module.module:save_translation_file.module_tree
+msgid "Save translation file"
+msgstr ""
+
+```
+
+  File: i18n/fr.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+#	* save_translation_file
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 10.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2017-03-21 10:36+0000\n"
+"PO-Revision-Date: 2017-03-21 10:36+0000\n"
+"Last-Translator: <>\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: \n"
+"Plural-Forms: \n"
+
+#. module: save_translation_file
+#: model:ir.model,name:save_translation_file.model_ir_module_module
+msgid "Module"
+msgstr "Module"
+
+#. module: save_translation_file
+#: model:ir.ui.view,arch_db:save_translation_file.module_form
+#: model:ir.ui.view,arch_db:save_translation_file.module_tree
+msgid "Overwrite all i18n files for this module ?"
+msgstr "Ecraser tous les fichiers i18n de ce module ?"
+
+#. module: save_translation_file
+#: model:ir.ui.view,arch_db:save_translation_file.module_form
+#: model:ir.ui.view,arch_db:save_translation_file.module_tree
+msgid "Save translation file"
+msgstr "Sauvegarder le fichier de traduction"
+
+
+```
+
+  File: i18n/it.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# * save_translation_file
+# 
+# Translators:
+# Paolo Valier, 2016
+msgid ""
+msgstr ""
+"Project-Id-Version: server-tools (8.0)\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2016-03-17 15:37+0000\n"
+"PO-Revision-Date: 2016-03-13 09:37+0000\n"
+"Last-Translator: Paolo Valier\n"
+"Language-Team: Italian (http://www.transifex.com/oca/OCA-server-tools-8-0/language/it/)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: \n"
+"Language: it\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#. module: save_translation_file
+#: model:ir.model,name:save_translation_file.model_ir_module_module
+msgid "Module"
+msgstr "Modulo"
+
+#. module: save_translation_file
+#: view:ir.module.module:save_translation_file.module_form
+#: view:ir.module.module:save_translation_file.module_tree
+msgid "Overwrite all i18n files for this module ?"
+msgstr "Sovrascrivi tutti i file l18n per questo modulo?"
+
+#. module: save_translation_file
+#: view:ir.module.module:save_translation_file.module_form
+#: view:ir.module.module:save_translation_file.module_tree
+msgid "Save translation file"
+msgstr "Salva il file della traduzione"
+
+```
+
+  File: i18n/sl.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# * save_translation_file
+# 
+# Translators:
+# Matjaž Mozetič <m.mozetic@matmoz.si>, 2016
+msgid ""
+msgstr ""
+"Project-Id-Version: server-tools (8.0)\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2016-03-12 02:06+0000\n"
+"PO-Revision-Date: 2016-03-08 06:58+0000\n"
+"Last-Translator: Matjaž Mozetič <m.mozetic@matmoz.si>\n"
+"Language-Team: Slovenian (http://www.transifex.com/oca/OCA-server-tools-8-0/language/sl/)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: \n"
+"Language: sl\n"
+"Plural-Forms: nplurals=4; plural=(n%100==1 ? 0 : n%100==2 ? 1 : n%100==3 || n%100==4 ? 2 : 3);\n"
+
+#. module: save_translation_file
+#: model:ir.model,name:save_translation_file.model_ir_module_module
+msgid "Module"
+msgstr "Modul"
+
+#. module: save_translation_file
+#: view:ir.module.module:save_translation_file.module_form
+#: view:ir.module.module:save_translation_file.module_tree
+msgid "Overwrite all i18n files for this module ?"
+msgstr "Naj povozim vse i18n datoteke za ta modul?"
+
+#. module: save_translation_file
+#: view:ir.module.module:save_translation_file.module_form
+#: view:ir.module.module:save_translation_file.module_tree
+msgid "Save translation file"
+msgstr "Shrani datoteko prevoda"
+
+```
+
+  File: i18n/tr.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# * save_translation_file
+# 
+# Translators:
+# Ahmet Altinisik <aaltinisik@altinkaya.com.tr>, 2016
+# Ahmet Altinisik <aaltinisik@altinkaya.com.tr>, 2015-2016
+# Alejandro Santana <alejandrosantana@anubia.es>, 2015
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2013
+# Guewen Baconnier <guewen.baconnier@camptocamp.com>, 2015
+# Hotellook, 2014
+# Matjaž Mozetič <m.mozetic@matmoz.si>, 2015-2016
+# Paolo Valier, 2016
+# SaFi J. <safi2266@gmail.com>, 2015
+msgid ""
+msgstr ""
+"Project-Id-Version: server-tools (8.0)\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2016-12-24 05:32+0000\n"
+"PO-Revision-Date: 2016-12-30 20:01+0000\n"
+"Last-Translator: Ahmet Altinisik <aaltinisik@altinkaya.com.tr>\n"
+"Language-Team: Turkish (http://www.transifex.com/oca/OCA-server-tools-8-0/language/tr/)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: \n"
+"Language: tr\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#. module: save_translation_file
+#: model:ir.model,name:save_translation_file.model_ir_module_module
+msgid "Module"
+msgstr "Modül"
+
+#. module: save_translation_file
+#: view:ir.module.module:save_translation_file.module_form
+#: view:ir.module.module:save_translation_file.module_tree
+msgid "Overwrite all i18n files for this module ?"
+msgstr "Bu modülde kayıtlı bütün i18n dosyalarının üzerine yazılsın mı ?"
+
+#. module: save_translation_file
+#: view:ir.module.module:save_translation_file.module_form
+#: view:ir.module.module:save_translation_file.module_tree
+msgid "Save translation file"
+msgstr "Çevirileri dosyaya kaydet"
+
+```
+
+Static:
+  File: static/description/icon.png
+  Content:
+```
+Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte
+```
+
+Tests:
+  File: tests/__init__.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+# © 2016-TODAY Akretion
+# License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl.html).
+
+from . import test_save_translation_file
+
+```
+
+  File: tests/test_save_translation_file.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+# © 2016-TODAY Akretion
+# License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl.html).
+
+import os
+
+from odoo.modules import get_module_path
+from odoo.tools.misc import get_iso_codes
+from odoo.tools.translate import load_language
+import openerp.tests.common as common
+
+
+class TestIrModuleModule(common.TransactionCase):
+
+    def test_button_save_translation(self):
+
+        load_language(self.cr, 'fr_FR')
+
+        condition = [('name', '=', 'save_translation_file')]
+        record = self.env['ir.module.module'].search(condition)
+        record.button_save_translation()
+
+        i18n_path = os.path.join(get_module_path(record.name), 'i18n')
+        lang_obj = self.env['res.lang']
+        condition = [('translatable', '=', True), ('code', '!=', 'en_US')]
+        langs = lang_obj.search(condition)
+
+        for lang in langs:
+            iso_code = get_iso_codes(lang.code)
+            path = os.path.join(i18n_path, '%s.po' % iso_code)
+            self.assertEqual(os.path.isfile(path), True,
+                             '%s.po must exists' % iso_code)
+
+```
+
+Other_files:
+  File: README.rst
+  Content:
+```
+.. image:: https://img.shields.io/badge/licence-AGPL--3-blue.svg
+   :target: http://www.gnu.org/licenses/agpl-3.0-standalone.html
+   :alt: License: AGPL-3
+
+=====================
+Save translation file
+=====================
+
+This module was written for **developpers** to easily generate i18n files (.po and .pot) from the list of modules,
+instead of using the native configuration "Export Translation" wizard.
+
+- The i18n subdirectory is created if missing in the module.
+- A ".po" file is generated for each installed languages.
+- If a ".po" file exists it is **overwritten** (use with caution).
+
+Usage
+=====
+
+To use this module, you need to:
+
+* Go to the view list (or form) of installed modules and click the button 'Save translation file'
+
+.. image:: https://odoo-community.org/website/image/ir.attachment/5784_f2813bd/datas
+   :alt: Try me on Runbot
+   :target: https://runbot.odoo-community.org/runbot/149/10.0
+
+Bug Tracker
+===========
+
+Bugs are tracked on `GitHub Issues
+<https://github.com/OCA/server-tools/issues>`_. In case of trouble, please
+check there if your issue has already been reported. If you spotted it first,
+help us smashing it by providing a detailed and welcomed `feedback
+<https://github.com/OCA/
+server-tools/issues/new?body=module:%20
+save_translation_file%0Aversion:%20
+10.0%0A%0A**Steps%20to%20reproduce**%0A-%20...%0A%0A**Current%20behavior**%0A%0A**Expected%20behavior**>`_.
+
+Credits
+=======
+
+Akretion (http://www.akretion.com)
+
+Images
+------
+
+* Odoo Community Association: `Icon <https://github.com/OCA/maintainer-tools/blob/master/template/module/static/description/icon.svg>`_.
+
+Contributors
+------------
+
+* Sylvain Calador <sylvain.calador@akretion.com>
+* Mourad EL HADJ MIMOUNE <mourad.elhadj.mimoune@akretion.com>
+
+Maintainer
+----------
+
+.. image:: https://odoo-community.org/logo.png
+   :alt: Odoo Community Association
+   :target: https://odoo-community.org
+
+This module is maintained by the OCA.
+
+OCA, or the Odoo Community Association, is a nonprofit organization whose
+mission is to support the collaborative development of Odoo features and
+promote its widespread use.
+
+To contribute to this module, please visit https://odoo-community.org.
+
+.. image:: https://img.shields.io/badge/licence-AGPL--3-blue.svg
+    :alt: License: AGPL-3
+
+```
+

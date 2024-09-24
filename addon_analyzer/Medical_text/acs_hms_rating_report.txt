@@ -1,0 +1,1693 @@
+Addon: acs_hms_rating
+
+Manifest: __manifest__.py
+Content:
+```python
+# -*- coding: utf-8 -*-
+#╔══════════════════════════════════════════════════════════════════════╗
+#║                                                                      ║
+#║                  ╔═══╦╗       ╔╗  ╔╗     ╔═══╦═══╗                   ║
+#║                  ║╔═╗║║       ║║ ╔╝╚╗    ║╔═╗║╔═╗║                   ║
+#║                  ║║ ║║║╔╗╔╦╦══╣╚═╬╗╔╬╗ ╔╗║║ ╚╣╚══╗                   ║
+#║                  ║╚═╝║║║╚╝╠╣╔╗║╔╗║║║║║ ║║║║ ╔╬══╗║                   ║
+#║                  ║╔═╗║╚╣║║║║╚╝║║║║║╚╣╚═╝║║╚═╝║╚═╝║                   ║
+#║                  ╚╝ ╚╩═╩╩╩╩╩═╗╠╝╚╝╚═╩═╗╔╝╚═══╩═══╝                   ║
+#║                            ╔═╝║     ╔═╝║                             ║
+#║                            ╚══╝     ╚══╝                             ║
+#║                  SOFTWARE DEVELOPED AND SUPPORTED BY                 ║
+#║                ALMIGHTY CONSULTING SOLUTIONS PVT. LTD.               ║
+#║                      COPYRIGHT (C) 2016 - TODAY                      ║
+#║                      https://www.almightycs.com                      ║
+#║                                                                      ║
+#╚══════════════════════════════════════════════════════════════════════╝
+{
+    'name': 'Rating in Hospital Services',
+    'version': '1.0.1',
+    'summary': 'Rating in Hospital Management System By AlmightyCS',
+    'description': """
+        Manage Rating of hospital Services. Get Avg Rating of Doctor and Department. 
+        Rating in Hospital Management System By AlmightyCS
+    """,
+    'category': 'Medical',
+    'author': 'Almighty Consulting Solutions Pvt. Ltd.',
+    'support': 'info@almightycs.com',
+    'website': 'https://www.almightycs.com',
+    'license': 'OPL-1',
+    'depends': ['acs_hms', 'rating'],
+    'data': [
+        'security/security.xml',
+        'security/ir.model.access.csv',
+        'data/mail_template.xml',
+        'data/data.xml',
+        'views/acs_rating_view.xml',
+        'views/acs_hms_views.xml',
+        'views/res_config_view.xml',
+    ],
+    'images': [
+        'static/description/acs_hms_rating_almightycs_cover.jpg',
+    ],
+    'installable': True,
+    'application': False,
+    'sequence': 5,
+    'price': 51,
+    'currency': 'USD',
+}
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+
+```
+
+__init__.py:
+Content:
+```python
+# -*- coding: utf-8 -*-
+
+from . import models
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+Models:
+  File: models/__init__.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from . import acs_hms
+from . import res_config
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: models/acs_hms.py
+  Content:
+```
+#-*- coding: utf-8 -*-
+from odoo import fields, models, api, _
+
+
+class AcsHmsAppointment(models.Model):
+    _name = "hms.appointment"
+    _inherit = ["rating.mixin", "hms.appointment"]
+
+    def appointment_done(self):
+        self._send_appointment_rating_mail()
+        return super(AcsHmsAppointment, self).appointment_done()
+
+    def _send_appointment_rating_mail(self, force_send=False):
+        for rec in self:
+            try:
+                rating_template = self.sudo().company_id.appointment_rating_mail_template_id
+            except ValueError:
+                rating_template = False
+            if rating_template:
+                rec.rating_send_request(rating_template, lang=rec.patient_id.partner_id.lang, force_send=force_send)
+
+    def _rating_get_parent_field_name(self):
+        return 'department_id'
+
+    def _rating_get_partner_id(self):
+        return self.patient_id.partner_id
+
+    def _rating_get_rated_partner_id(self):
+        return self.physician_id.partner_id
+
+
+class HMSPhysician(models.Model):
+    _inherit = "hms.physician"
+
+    @api.depends('appointment_ids.rating_ids.rating')
+    def _compute_percentage_satisfaction_appointment(self):
+        for rec in self:
+            activity = rec.appointment_ids.rating_get_grades()
+            rec.percentage_satisfaction_appointment = activity['great'] * 100 / sum(activity.values()) if sum(activity.values()) else -1
+
+    percentage_satisfaction_appointment = fields.Integer(
+        compute='_compute_percentage_satisfaction_appointment', string="Happy % on Appointment", store=True, default=-1)
+
+    def action_view_hms_appointment_rating(self):
+        action = self.env["ir.actions.actions"]._for_xml_id("acs_hms_rating.action_view_hms_rating")
+        action['name'] = _('Ratings of %s') % (self.name,)
+        action['domain'] = [('consumed','=',True), ('res_model','=','hms.appointment'), ('rated_partner_id','=',self.partner_id.id)]
+        return action
+
+
+class HrDepartment(models.Model):
+    _inherit = "hr.department"
+
+    @api.depends('appointment_ids.rating_ids.rating')
+    def _compute_percentage_satisfaction_appointment(self):
+        for rec in self:
+            activity = rec.appointment_ids.rating_get_grades()
+            rec.percentage_satisfaction_appointment = activity['great'] * 100 / sum(activity.values()) if sum(activity.values()) else -1
+
+    percentage_satisfaction_appointment = fields.Integer(
+        compute='_compute_percentage_satisfaction_appointment', string="Happy % on Appointment", store=True, default=-1)
+
+    def action_view_hms_appointment_rating(self):
+        action = self.env["ir.actions.actions"]._for_xml_id("acs_hms_rating.action_view_hms_rating")
+        action['name'] = _('Ratings of %s') % (self.name,)
+        action['domain'] = [('consumed','=',True), ('res_model','=','hms.appointment'), ('parent_res_model','=','hr.department'), ('parent_res_id','=',self.id)]
+        return action
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: models/res_config.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+# Part of AlmightyCS See LICENSE file for full copyright and licensing details.
+
+from odoo import api, fields, models
+
+
+class ResCompany(models.Model):
+    _inherit = "res.company"
+
+    appointment_rating_mail_template_id = fields.Many2one('mail.template', 'Appointment Rating Mail Template',
+        help="This will set the default mail template for Appointment Rating Request.")
+
+
+class ResConfigSettings(models.TransientModel):
+    _inherit = 'res.config.settings'
+
+    appointment_rating_mail_template_id = fields.Many2one('mail.template', 
+        related='company_id.appointment_rating_mail_template_id',
+        string='Appointment Rating Mail Template',
+        help="This will set the default mail template for Appointment Rating Request.", readonly=False)
+```
+
+Views:
+  File: views/acs_hms_views.xml
+  Content:
+```
+<?xml version="1.0"?>
+<odoo>
+
+    <!-- Department -->
+    <record id="view_department_form" model="ir.ui.view">
+        <field name="name">hr.department.form</field>
+        <field name="model">hr.department</field>
+        <field name="inherit_id" ref="hr.view_department_form"/>
+        <field name="arch" type="xml">
+            <field name="active" position="before">
+                <div class="oe_button_box" name="button_box">
+                    <button name="action_view_hms_appointment_rating"
+                        invisible="percentage_satisfaction_appointment==-1"
+                        class="oe_stat_button oe_percent"
+                        type="object"
+                        icon="fa-smile-o">
+                        <field string="% On Appointments" name="percentage_satisfaction_appointment" widget="statinfo"/>
+                    </button>
+                </div>
+            </field>
+        </field>
+    </record>
+
+    <record id="hr_department_view_kanban" model="ir.ui.view">
+        <field name="name">hr.department.form</field>
+        <field name="model">hr.department</field>
+        <field name="inherit_id" ref="hr.hr_department_view_kanban"/>
+        <field name="arch" type="xml">
+            <field name="color" position="after">
+                <field name="percentage_satisfaction_appointment"/>
+            </field>
+
+            <xpath expr="//div[hasclass('o_kanban_card_content')]" position="inside">
+                <div class="mt8 text-primary" title="Percentage of happy ratings.">
+                    <b>
+                        <t t-if="record.percentage_satisfaction_appointment.value == -1">
+                            <i class="fa fa-smile-o"/> No rating yet
+                        </t>
+                        <t t-if="record.percentage_satisfaction_appointment.value != -1">
+                            <a name="action_view_hms_appointment_rating" type="object">
+                                <i class="fa fa-smile-o"/> <t t-esc="record.percentage_satisfaction_appointment.value"/>%
+                            </a>
+                        </t>
+                    </b>
+                </div>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Physician -->
+    <record id="view_physician_form" model="ir.ui.view">
+        <field name="name">hms.physician.form</field>
+        <field name="model">hms.physician</field>
+        <field name="inherit_id" ref="acs_hms.view_physician_form"/>
+        <field name="arch" type="xml">
+            <div name="button_box" position="inside">
+                <button name="action_view_hms_appointment_rating"
+                    invisible="percentage_satisfaction_appointment==-1"
+                    class="oe_stat_button oe_percent"
+                    type="object"
+                    icon="fa-smile-o">
+                    <field string="% On Appointments" name="percentage_satisfaction_appointment" widget="statinfo"/>
+                </button>
+            </div>
+        </field>
+    </record>
+
+    <record id="physician_kanban_view" model="ir.ui.view">
+        <field name="name">hms.physician.form</field>
+        <field name="model">hms.physician</field>
+        <field name="inherit_id" ref="acs_hms.physician_kanban_view"/>
+        <field name="arch" type="xml">
+            <field name="hr_presence_state" position="after">
+                <field name="percentage_satisfaction_appointment"/>
+            </field>
+
+            <xpath expr="//div[hasclass('oe_kanban_details')]" position="inside">
+                <div class="mt8 text-primary" title="Percentage of happy ratings.">
+                    <b>
+                        <t t-if="record.percentage_satisfaction_appointment.value == -1">
+                            <i class="fa fa-smile-o"/> No rating yet
+                        </t>
+                        <t t-if="record.percentage_satisfaction_appointment.value != -1">
+                            <a name="action_view_hms_appointment_rating" type="object">
+                                <i class="fa fa-smile-o"/> <t t-esc="record.percentage_satisfaction_appointment.value"/>%
+                            </a>
+                        </t>
+                    </b>
+                </div>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>
+
+```
+
+  File: views/acs_rating_view.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="rating_rating_view_search_hms" model="ir.ui.view">
+        <field name="name">rating.rating.search.hms</field>
+        <field name="model">rating.rating</field>
+        <field name="inherit_id" ref="rating.rating_rating_view_search"/>
+        <field name="mode">primary</field>
+        <field name="arch" type="xml">
+            <xpath expr="//filter[@name='rating_unhappy']" position="after">
+                <separator />
+                <filter string="Rating for Appointment" name="rating_appointments" domain="[('res_model', '=', 'hms.appointment')]" />
+            </xpath>
+            <xpath expr="//filter[@name='resource']" position="after">
+                <field name="parent_res_name"/>
+                <filter string="Department" name="groupby_department" context="{'group_by': 'parent_res_name'}"/>
+            </xpath>
+            <xpath expr="/search" position="inside">
+                <filter string="Last 30 days" name="rating_last_30_days" domain="[('create_date', '>=', (context_today()-datetime.timedelta(days=30)).strftime('%Y-%m-%d'))]"/>
+                <separator/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="action_view_hms_rating" model="ir.actions.act_window">
+        <field name="name">Rating</field>
+        <field name="res_model">rating.rating</field>
+        <field name="view_mode">kanban,tree,graph,pivot,form</field>
+        <field name="search_view_id" ref="rating_rating_view_search_hms"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                There is no rating for this object at the moment.
+            </p>
+        </field>
+    </record>
+
+</odoo>
+```
+
+  File: views/res_config_view.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="res_config_settings_view_form" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.vaccination</field>
+        <field name="model">res.config.settings</field>
+        <field name="priority" eval="10"/>
+        <field name="inherit_id" ref="acs_hms.res_config_settings_view_form" />
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='prescription_data']" position="before">
+                <block title="Rating" name="rating_setting_container">
+                    <setting help="Appointment Rating Request." id="appointment_rating_mail_template_id_setting">
+                        <field name="appointment_rating_mail_template_id" class="o_light_label" string="Appointment Rating Mail template"/>
+                    </setting>
+                </block>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>
+```
+
+Security:
+  File: security/security.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+
+    </data>
+</odoo>
+
+```
+
+Data:
+  File: data/data.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+
+        <!-- Company Data -->
+        <record id="base.main_company" model="res.company" >
+            <field name="appointment_rating_mail_template_id" ref="appointment_patient_rating_request_email_template"/>
+        </record>
+
+    </data>
+</odoo>
+```
+
+  File: data/mail_template.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">                    
+
+        <record id="appointment_patient_rating_request_email_template" model="mail.template">
+            <field name="name">Appointment: Rating Request</field>
+            <field name="email_from">{{ user.email_formatted }}</field>
+            <field name="subject">{{ object.company_id.name }}: Appointment Rating Request</field>
+            <field name="model_id" ref="acs_hms.model_hms_appointment"/>
+            <field name="partner_to" >{{ object._rating_get_partner_id().id }}</field>
+            <field name="auto_delete" eval="True"/>
+            <field name="body_html" type="html">
+<div>
+    <t t-set="access_token" t-value="object._rating_get_access_token()"/>
+    <table style="width:600px;margin:5px auto;">
+        <tbody>
+            <tr><td>
+                <a href="/"><img src="/web/binary/company_logo" style="vertical-align:baseline;max-width:100px;" /></a>
+            </td><td style="text-align:right;vertical-align:middle;">
+                    Satisfaction Survey
+            </td></tr>
+
+        </tbody>
+    </table>
+    <table border="0" cellpadding="0" cellspacing="0" width="590" style="width:100%; margin:0px auto;">
+        <tbody>
+            <tr><td style="padding:15px 20px 10px 20px;">
+                <p>Hello,</p>
+                <p>Please take a moment to rate our services related to the Appointment <strong> <span t-out="object.name"/></strong> with <strong> <span t-out="object._rating_get_rated_partner_id().name"/></strong>.</p>
+                <p>We appreciate your feedback. It helps us to improve continuously.</p>
+            </td></tr>
+            
+            <tr><td style="text-align: center;">
+                <table border="0" cellpadding="0" cellspacing="0" width="590" summary="o_mail_notification" style="width:100%; margin: 32px 0px 32px 0px;">
+                    <tr><td style="font-size: 13px;">
+                        <strong>Tell us how you feel about our service</strong><br/>
+                        <span style="font-size: 12px; opacity: 0.5; color: #454748;">(click on one of these smileys)</span>
+                    </td></tr>
+                    <tr><td style="font-size: 13px;">
+                        <table style="width:100%;text-align:center;margin-top:2rem;">
+                            <tr>
+                                <td>
+                                    <a t-attf-href="/rate/{{ access_token }}/5">
+                                        <img alt="Satisfied" src="/rating/static/src/img/rating_5.png" title="Satisfied"/>
+                                    </a>
+                                </td>
+                                <td>
+                                    <a t-attf-href="/rate/{{ access_token }}/3">
+                                        <img alt="Okay" src="/rating/static/src/img/rating_3.png" title="Okay"/>
+                                    </a>
+                                </td>
+                                <td>
+                                    <a t-attf-href="/rate/{{ access_token }}/1">
+                                        <img alt="Dissatisfied" src="/rating/static/src/img/rating_1.png" title="Dissatisfied"/>
+                                    </a>
+                                </td>
+                            </tr>
+                        </table>
+                    </td></tr>
+                </table>
+            </td></tr>
+
+        </tbody>
+    </table>
+    <table style="width:600px;margin:auto;text-align:center;font-size:12px;">
+        <tbody>
+            <tr><td style="padding-top:10px;color:#afafaf;">
+                <p>This Patient survey has been sent because your Appoitment has been Completed.</p>
+            </td></tr>
+        </tbody>
+    </table>
+</div>
+            </field>
+        </record>
+
+    </data>
+</odoo>
+
+```
+
+I18n:
+  File: i18n/es.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_rating
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 15.0-20211119\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-12-03 20:54+0000\n"
+"PO-Revision-Date: 2021-12-03 16:04-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 3.0\n"
+"Last-Translator: \n"
+"Language: es\n"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.view_department_form
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.view_physician_form
+msgid "% On Appointments"
+msgstr "% de Citas"
+
+#. module: acs_hms_rating
+#: model:mail.template,body_html:acs_hms_rating.appointment_patient_rating_request_email_template
+msgid ""
+"<div style=\"background:#F0F0F0;color:#515166;padding:10px 0px;font-family:"
+"Arial,Helvetica,sans-serif;font-size:14px;\">\n"
+"    <t t-set=\"access_token\" t-value=\"object.rating_get_access_token()\"/"
+">\n"
+"    <table style=\"width:600px;margin:5px auto;\">\n"
+"        <tbody>\n"
+"            <tr><td>\n"
+"                <a href=\"/\"><img src=\"/web/binary/company_logo\" style="
+"\"vertical-align:baseline;max-width:100px;\"/></a>\n"
+"            </td><td style=\"text-align:right;vertical-align:middle;\">\n"
+"                    Satisfaction Survey\n"
+"            </td></tr>\n"
+"\n"
+"        </tbody>\n"
+"    </table>\n"
+"    <table style=\"width:600px;margin:0px auto;background:white;border:1px "
+"solid #e1e1e1;\">\n"
+"        <tbody>\n"
+"            <tr><td style=\"padding:15px 20px 10px 20px;\">\n"
+"                <p>Hello,</p>\n"
+"                <p>Please take a moment to rate our services related to the "
+"Appointment <strong> <t t-out=\"object.name\"/></strong> with <strong> <t t-"
+"out=\"object.rating_get_rated_partner_id().name\"/></strong>.</p>\n"
+"                <p>We appreciate your feedback. It helps us to improve "
+"continuously.</p>\n"
+"            </td></tr>\n"
+"            <tr><td style=\"padding:10px 20px\">\n"
+"                <table summary=\"o_mail_notification\" style=\"width:100%;"
+"border-top:1px solid #e1e1e1;\">\n"
+"                    <tr>\n"
+"                        <td style=\"text-align:center;\">\n"
+"                            <h2 style=\"font-weight:300;font-size:18px;\">\n"
+"                                Tell us how you feel about our service:\n"
+"                            </h2>\n"
+"                            <div style=\"text-color: #888888\">(click on one "
+"of these smileys)</div>\n"
+"                        </td>\n"
+"                    </tr>\n"
+"                    <tr>\n"
+"                        <td style=\"padding:10px 10px;\">\n"
+"                            <table style=\"width:100%;text-align:center;\">\n"
+"                                <tr>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/5\">\n"
+"                                            <img alt=\"Satisfied\" src=\"/"
+"rating/static/src/img/rating_5.png\" title=\"Satisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/3\">\n"
+"                                            <img alt=\"Not satisfied\" src="
+"\"/rating/static/src/img/rating_3.png\" title=\"Not satisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/1\">\n"
+"                                            <img alt=\"Highly Dissatisfied\" "
+"src=\"/rating/static/src/img/rating_1.png\" title=\"Highly Dissatisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                </tr>\n"
+"                            </table>\n"
+"                        </td>\n"
+"                    </tr>\n"
+"                </table>\n"
+"            </td></tr>\n"
+"        </tbody>\n"
+"    </table>\n"
+"    <table style=\"width:600px;margin:auto;text-align:center;font-size:12px;"
+"\">\n"
+"        <tbody>\n"
+"            <tr><td style=\"padding-top:10px;color:#afafaf;\">\n"
+"                <p>This Patient survey has been sent because your Appoitment "
+"has been Completed.</p>\n"
+"            </td></tr>\n"
+"        </tbody>\n"
+"    </table>\n"
+"</div>\n"
+"            "
+msgstr ""
+"<div style=\"background:#F0F0F0;color:#515166;padding:10px 0px;font-family:"
+"Arial,Helvetica,sans-serif;font-size:14px;\">\n"
+"    <t t-set=\"access_token\" t-value=\"object.rating_get_access_token()\"/"
+">\n"
+"    <table style=\"width:600px;margin:5px auto;\">\n"
+"        <tbody>\n"
+"            <tr><td>\n"
+"                <a href=\"/\"><img src=\"/web/binary/company_logo\" style="
+"\"vertical-align:baseline;max-width:100px;\"/></a>\n"
+"            </td><td style=\"text-align:right;vertical-align:middle;\">\n"
+"                    Encuesta de Satisfacción\n"
+"            </td></tr>\n"
+"\n"
+"        </tbody>\n"
+"    </table>\n"
+"    <table style=\"width:600px;margin:0px auto;background:white;border:1px "
+"solid #e1e1e1;\">\n"
+"        <tbody>\n"
+"            <tr><td style=\"padding:15px 20px 10px 20px;\">\n"
+"                <p>Hola Estimado,</p>\n"
+"                <p>Tómese un momento para calificar nuestros servicios "
+"relacionados con la cita. <strong> <t t-out=\"object.name\"/></strong> con "
+"<strong> <t t-out=\"object.rating_get_rated_partner_id().name\"/></strong>.</"
+"p>\n"
+"                <p>Agradecemos sus comentarios. Nos ayuda a mejorar "
+"continuamente.</p>\n"
+"            </td></tr>\n"
+"            <tr><td style=\"padding:10px 20px\">\n"
+"                <table summary=\"o_mail_notification\" style=\"width:100%;"
+"border-top:1px solid #e1e1e1;\">\n"
+"                    <tr>\n"
+"                        <td style=\"text-align:center;\">\n"
+"                            <h2 style=\"font-weight:300;font-size:18px;\">\n"
+"                                Díganos cómo se siente acerca de nuestro "
+"servicio:\n"
+"                            </h2>\n"
+"                            <div style=\"text-color: #888888”>(haga click en "
+"una de la caritas)</div>\n"
+"                        </td>\n"
+"                    </tr>\n"
+"                    <tr>\n"
+"                        <td style=\"padding:10px 10px;\">\n"
+"                            <table style=\"width:100%;text-align:center;\">\n"
+"                                <tr>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/5\">\n"
+"                                            <img alt=\"Satisfied\" src=\"/"
+"rating/static/src/img/rating_5.png\" title=\"Satisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/3\">\n"
+"                                            <img alt=\"Not satisfied\" src="
+"\"/rating/static/src/img/rating_3.png\" title=\"Not satisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/1\">\n"
+"                                            <img alt=\"Highly Dissatisfied\" "
+"src=\"/rating/static/src/img/rating_1.png\" title=\"Highly Dissatisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                </tr>\n"
+"                            </table>\n"
+"                        </td>\n"
+"                    </tr>\n"
+"                </table>\n"
+"            </td></tr>\n"
+"        </tbody>\n"
+"    </table>\n"
+"    <table style=\"width:600px;margin:auto;text-align:center;font-size:12px;"
+"\">\n"
+"        <tbody>\n"
+"            <tr><td style=\"padding-top:10px;color:#afafaf;\">\n"
+"                <p>Se le envió esta encuesta porque se completó su cita.</"
+"p>\n"
+"            </td></tr>\n"
+"        </tbody>\n"
+"    </table>\n"
+"</div>\n"
+"            "
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.hr_department_view_kanban
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.physician_kanban_view
+msgid "<i class=\"fa fa-smile-o\"/> No rating yet"
+msgstr "<i class=\"fa fa-smile-o\"/> Sin calificación aún"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.res_config_settings_view_form
+msgid "<span class=\"o_form_label\">Appointment Rating Mail template</span>"
+msgstr ""
+"<span class=\"o_form_label\">Plantilla de correo de Rating de citas</span>"
+
+#. module: acs_hms_rating
+#: model:ir.model,name:acs_hms_rating.model_hms_appointment
+msgid "Appointment"
+msgstr "Cita"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_res_company__appointment_rating_mail_template_id
+#: model:ir.model.fields,field_description:acs_hms_rating.field_res_config_settings__appointment_rating_mail_template_id
+msgid "Appointment Rating Mail Template"
+msgstr "Plantilla de correo de clasificación de citas"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.res_config_settings_view_form
+msgid "Appointment Rating Request."
+msgstr "Solicitud de Rating de cita."
+
+#. module: acs_hms_rating
+#: model:mail.template,name:acs_hms_rating.appointment_patient_rating_request_email_template
+msgid "Appointment: Rating Request"
+msgstr "Solicitud de Rating de cita."
+
+#. module: acs_hms_rating
+#: model:ir.model,name:acs_hms_rating.model_res_config_settings
+msgid "Config Settings"
+msgstr "Opciones de configuración"
+
+#. module: acs_hms_rating
+#: model:ir.model,name:acs_hms_rating.model_hr_department
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.rating_rating_view_search_hms
+msgid "Department"
+msgstr "Departamento"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_physician__percentage_satisfaction_appointment
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hr_department__percentage_satisfaction_appointment
+msgid "Happy % on Appointment"
+msgstr "Feliz % en Cita"
+
+#. module: acs_hms_rating
+#: model:ir.model,name:acs_hms_rating.model_res_company
+msgid "Hospital"
+msgstr "Hospital"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.rating_rating_view_search_hms
+msgid "Last 30 days"
+msgstr "Últimos 30 días"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.hr_department_view_kanban
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.physician_kanban_view
+msgid "Percentage of happy ratings."
+msgstr "Porcentaje de calificaciones felices."
+
+#. module: acs_hms_rating
+#: model:ir.model,name:acs_hms_rating.model_hms_physician
+msgid "Physician"
+msgstr "Profesional"
+
+#. module: acs_hms_rating
+#: model:ir.actions.act_window,name:acs_hms_rating.action_view_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_ids
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.res_config_settings_view_form
+msgid "Rating"
+msgstr "Rating"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_avg
+msgid "Rating Average"
+msgstr "Calificación Promedio"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_last_feedback
+msgid "Rating Last Feedback"
+msgstr "Calificación de los últimos comentarios"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_last_image
+msgid "Rating Last Image"
+msgstr "Imagen de la última calificación"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_last_value
+msgid "Rating Last Value"
+msgstr "Último valor de Calificación"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_count
+msgid "Rating count"
+msgstr "Recuento de calificaciones"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.rating_rating_view_search_hms
+msgid "Rating for Appointment"
+msgstr "Rating para cita."
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,help:acs_hms_rating.field_hms_appointment__rating_last_feedback
+msgid "Reason of the rating"
+msgstr "Motivo de la calificación"
+
+#. module: acs_hms_rating
+#: model_terms:ir.actions.act_window,help:acs_hms_rating.action_view_hms_rating
+msgid "There is no rating for this object at the moment."
+msgstr "No hay ninguna calificación para este objeto en este momento."
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,help:acs_hms_rating.field_res_company__appointment_rating_mail_template_id
+#: model:ir.model.fields,help:acs_hms_rating.field_res_config_settings__appointment_rating_mail_template_id
+msgid "This will set the default mail template for Appointment Rating Request."
+msgstr ""
+"Esto establecerá la plantilla de correo predeterminada para solicitud de "
+"calificación de cita."
+
+#. module: acs_hms_rating
+#: model:mail.template,subject:acs_hms_rating.appointment_patient_rating_request_email_template
+msgid "{{ object.company_id.name }}: Appointment Rating Request"
+msgstr "{{ object.company_id.name }}: Solicitud de rating de citas"
+
+```
+
+  File: i18n/es_EC.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_rating
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 15.0-20211119\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-12-03 20:54+0000\n"
+"PO-Revision-Date: 2021-12-03 16:04-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 3.0\n"
+"Last-Translator: \n"
+"Language: es\n"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.view_department_form
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.view_physician_form
+msgid "% On Appointments"
+msgstr "% de Citas"
+
+#. module: acs_hms_rating
+#: model:mail.template,body_html:acs_hms_rating.appointment_patient_rating_request_email_template
+msgid ""
+"<div style=\"background:#F0F0F0;color:#515166;padding:10px 0px;font-family:"
+"Arial,Helvetica,sans-serif;font-size:14px;\">\n"
+"    <t t-set=\"access_token\" t-value=\"object.rating_get_access_token()\"/"
+">\n"
+"    <table style=\"width:600px;margin:5px auto;\">\n"
+"        <tbody>\n"
+"            <tr><td>\n"
+"                <a href=\"/\"><img src=\"/web/binary/company_logo\" style="
+"\"vertical-align:baseline;max-width:100px;\"/></a>\n"
+"            </td><td style=\"text-align:right;vertical-align:middle;\">\n"
+"                    Satisfaction Survey\n"
+"            </td></tr>\n"
+"\n"
+"        </tbody>\n"
+"    </table>\n"
+"    <table style=\"width:600px;margin:0px auto;background:white;border:1px "
+"solid #e1e1e1;\">\n"
+"        <tbody>\n"
+"            <tr><td style=\"padding:15px 20px 10px 20px;\">\n"
+"                <p>Hello,</p>\n"
+"                <p>Please take a moment to rate our services related to the "
+"Appointment <strong> <t t-out=\"object.name\"/></strong> with <strong> <t t-"
+"out=\"object.rating_get_rated_partner_id().name\"/></strong>.</p>\n"
+"                <p>We appreciate your feedback. It helps us to improve "
+"continuously.</p>\n"
+"            </td></tr>\n"
+"            <tr><td style=\"padding:10px 20px\">\n"
+"                <table summary=\"o_mail_notification\" style=\"width:100%;"
+"border-top:1px solid #e1e1e1;\">\n"
+"                    <tr>\n"
+"                        <td style=\"text-align:center;\">\n"
+"                            <h2 style=\"font-weight:300;font-size:18px;\">\n"
+"                                Tell us how you feel about our service:\n"
+"                            </h2>\n"
+"                            <div style=\"text-color: #888888\">(click on one "
+"of these smileys)</div>\n"
+"                        </td>\n"
+"                    </tr>\n"
+"                    <tr>\n"
+"                        <td style=\"padding:10px 10px;\">\n"
+"                            <table style=\"width:100%;text-align:center;\">\n"
+"                                <tr>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/5\">\n"
+"                                            <img alt=\"Satisfied\" src=\"/"
+"rating/static/src/img/rating_5.png\" title=\"Satisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/3\">\n"
+"                                            <img alt=\"Not satisfied\" src="
+"\"/rating/static/src/img/rating_3.png\" title=\"Not satisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/1\">\n"
+"                                            <img alt=\"Highly Dissatisfied\" "
+"src=\"/rating/static/src/img/rating_1.png\" title=\"Highly Dissatisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                </tr>\n"
+"                            </table>\n"
+"                        </td>\n"
+"                    </tr>\n"
+"                </table>\n"
+"            </td></tr>\n"
+"        </tbody>\n"
+"    </table>\n"
+"    <table style=\"width:600px;margin:auto;text-align:center;font-size:12px;"
+"\">\n"
+"        <tbody>\n"
+"            <tr><td style=\"padding-top:10px;color:#afafaf;\">\n"
+"                <p>This Patient survey has been sent because your Appoitment "
+"has been Completed.</p>\n"
+"            </td></tr>\n"
+"        </tbody>\n"
+"    </table>\n"
+"</div>\n"
+"            "
+msgstr ""
+"<div style=\"background:#F0F0F0;color:#515166;padding:10px 0px;font-family:"
+"Arial,Helvetica,sans-serif;font-size:14px;\">\n"
+"    <t t-set=\"access_token\" t-value=\"object.rating_get_access_token()\"/"
+">\n"
+"    <table style=\"width:600px;margin:5px auto;\">\n"
+"        <tbody>\n"
+"            <tr><td>\n"
+"                <a href=\"/\"><img src=\"/web/binary/company_logo\" style="
+"\"vertical-align:baseline;max-width:100px;\"/></a>\n"
+"            </td><td style=\"text-align:right;vertical-align:middle;\">\n"
+"                    Encuesta de Satisfacción\n"
+"            </td></tr>\n"
+"\n"
+"        </tbody>\n"
+"    </table>\n"
+"    <table style=\"width:600px;margin:0px auto;background:white;border:1px "
+"solid #e1e1e1;\">\n"
+"        <tbody>\n"
+"            <tr><td style=\"padding:15px 20px 10px 20px;\">\n"
+"                <p>Hola Estimado,</p>\n"
+"                <p>Tómese un momento para calificar nuestros servicios "
+"relacionados con la cita. <strong> <t t-out=\"object.name\"/></strong> con "
+"<strong> <t t-out=\"object.rating_get_rated_partner_id().name\"/></strong>.</"
+"p>\n"
+"                <p>Agradecemos sus comentarios. Nos ayuda a mejorar "
+"continuamente.</p>\n"
+"            </td></tr>\n"
+"            <tr><td style=\"padding:10px 20px\">\n"
+"                <table summary=\"o_mail_notification\" style=\"width:100%;"
+"border-top:1px solid #e1e1e1;\">\n"
+"                    <tr>\n"
+"                        <td style=\"text-align:center;\">\n"
+"                            <h2 style=\"font-weight:300;font-size:18px;\">\n"
+"                                Díganos cómo se siente acerca de nuestro "
+"servicio:\n"
+"                            </h2>\n"
+"                            <div style=\"text-color: #888888”>(haga click en "
+"una de la caritas)</div>\n"
+"                        </td>\n"
+"                    </tr>\n"
+"                    <tr>\n"
+"                        <td style=\"padding:10px 10px;\">\n"
+"                            <table style=\"width:100%;text-align:center;\">\n"
+"                                <tr>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/5\">\n"
+"                                            <img alt=\"Satisfied\" src=\"/"
+"rating/static/src/img/rating_5.png\" title=\"Satisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/3\">\n"
+"                                            <img alt=\"Not satisfied\" src="
+"\"/rating/static/src/img/rating_3.png\" title=\"Not satisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/1\">\n"
+"                                            <img alt=\"Highly Dissatisfied\" "
+"src=\"/rating/static/src/img/rating_1.png\" title=\"Highly Dissatisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                </tr>\n"
+"                            </table>\n"
+"                        </td>\n"
+"                    </tr>\n"
+"                </table>\n"
+"            </td></tr>\n"
+"        </tbody>\n"
+"    </table>\n"
+"    <table style=\"width:600px;margin:auto;text-align:center;font-size:12px;"
+"\">\n"
+"        <tbody>\n"
+"            <tr><td style=\"padding-top:10px;color:#afafaf;\">\n"
+"                <p>Se le envió esta encuesta porque se completó su cita.</"
+"p>\n"
+"            </td></tr>\n"
+"        </tbody>\n"
+"    </table>\n"
+"</div>\n"
+"            "
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.hr_department_view_kanban
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.physician_kanban_view
+msgid "<i class=\"fa fa-smile-o\"/> No rating yet"
+msgstr "<i class=\"fa fa-smile-o\"/> Sin calificación aún"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.res_config_settings_view_form
+msgid "<span class=\"o_form_label\">Appointment Rating Mail template</span>"
+msgstr ""
+"<span class=\"o_form_label\">Plantilla de correo de Rating de citas</span>"
+
+#. module: acs_hms_rating
+#: model:ir.model,name:acs_hms_rating.model_hms_appointment
+msgid "Appointment"
+msgstr "Cita"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_res_company__appointment_rating_mail_template_id
+#: model:ir.model.fields,field_description:acs_hms_rating.field_res_config_settings__appointment_rating_mail_template_id
+msgid "Appointment Rating Mail Template"
+msgstr "Plantilla de correo de clasificación de citas"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.res_config_settings_view_form
+msgid "Appointment Rating Request."
+msgstr "Solicitud de Rating de cita."
+
+#. module: acs_hms_rating
+#: model:mail.template,name:acs_hms_rating.appointment_patient_rating_request_email_template
+msgid "Appointment: Rating Request"
+msgstr "Solicitud de Rating de cita."
+
+#. module: acs_hms_rating
+#: model:ir.model,name:acs_hms_rating.model_res_config_settings
+msgid "Config Settings"
+msgstr "Opciones de configuración"
+
+#. module: acs_hms_rating
+#: model:ir.model,name:acs_hms_rating.model_hr_department
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.rating_rating_view_search_hms
+msgid "Department"
+msgstr "Departamento"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_physician__percentage_satisfaction_appointment
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hr_department__percentage_satisfaction_appointment
+msgid "Happy % on Appointment"
+msgstr "Feliz % en Cita"
+
+#. module: acs_hms_rating
+#: model:ir.model,name:acs_hms_rating.model_res_company
+msgid "Hospital"
+msgstr "Hospital"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.rating_rating_view_search_hms
+msgid "Last 30 days"
+msgstr "Últimos 30 días"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.hr_department_view_kanban
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.physician_kanban_view
+msgid "Percentage of happy ratings."
+msgstr "Porcentaje de calificaciones felices."
+
+#. module: acs_hms_rating
+#: model:ir.model,name:acs_hms_rating.model_hms_physician
+msgid "Physician"
+msgstr "Profesional"
+
+#. module: acs_hms_rating
+#: model:ir.actions.act_window,name:acs_hms_rating.action_view_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_ids
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.res_config_settings_view_form
+msgid "Rating"
+msgstr "Rating"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_avg
+msgid "Rating Average"
+msgstr "Calificación Promedio"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_last_feedback
+msgid "Rating Last Feedback"
+msgstr "Calificación de los últimos comentarios"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_last_image
+msgid "Rating Last Image"
+msgstr "Imagen de la última calificación"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_last_value
+msgid "Rating Last Value"
+msgstr "Último valor de Calificación"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_count
+msgid "Rating count"
+msgstr "Recuento de calificaciones"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.rating_rating_view_search_hms
+msgid "Rating for Appointment"
+msgstr "Rating para cita."
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,help:acs_hms_rating.field_hms_appointment__rating_last_feedback
+msgid "Reason of the rating"
+msgstr "Motivo de la calificación"
+
+#. module: acs_hms_rating
+#: model_terms:ir.actions.act_window,help:acs_hms_rating.action_view_hms_rating
+msgid "There is no rating for this object at the moment."
+msgstr "No hay ninguna calificación para este objeto en este momento."
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,help:acs_hms_rating.field_res_company__appointment_rating_mail_template_id
+#: model:ir.model.fields,help:acs_hms_rating.field_res_config_settings__appointment_rating_mail_template_id
+msgid "This will set the default mail template for Appointment Rating Request."
+msgstr ""
+"Esto establecerá la plantilla de correo predeterminada para solicitud de "
+"calificación de cita."
+
+#. module: acs_hms_rating
+#: model:mail.template,subject:acs_hms_rating.appointment_patient_rating_request_email_template
+msgid "{{ object.company_id.name }}: Appointment Rating Request"
+msgstr "{{ object.company_id.name }}: Solicitud de rating de citas"
+
+```
+
+  File: i18n/es_PA.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_rating
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 15.0-20211119\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-12-03 20:54+0000\n"
+"PO-Revision-Date: 2021-12-03 16:05-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 3.0\n"
+"Last-Translator: \n"
+"Language: es_PA\n"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.view_department_form
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.view_physician_form
+msgid "% On Appointments"
+msgstr "% de Citas"
+
+#. module: acs_hms_rating
+#: model:mail.template,body_html:acs_hms_rating.appointment_patient_rating_request_email_template
+msgid ""
+"<div style=\"background:#F0F0F0;color:#515166;padding:10px 0px;font-family:"
+"Arial,Helvetica,sans-serif;font-size:14px;\">\n"
+"    <t t-set=\"access_token\" t-value=\"object.rating_get_access_token()\"/"
+">\n"
+"    <table style=\"width:600px;margin:5px auto;\">\n"
+"        <tbody>\n"
+"            <tr><td>\n"
+"                <a href=\"/\"><img src=\"/web/binary/company_logo\" style="
+"\"vertical-align:baseline;max-width:100px;\"/></a>\n"
+"            </td><td style=\"text-align:right;vertical-align:middle;\">\n"
+"                    Satisfaction Survey\n"
+"            </td></tr>\n"
+"\n"
+"        </tbody>\n"
+"    </table>\n"
+"    <table style=\"width:600px;margin:0px auto;background:white;border:1px "
+"solid #e1e1e1;\">\n"
+"        <tbody>\n"
+"            <tr><td style=\"padding:15px 20px 10px 20px;\">\n"
+"                <p>Hello,</p>\n"
+"                <p>Please take a moment to rate our services related to the "
+"Appointment <strong> <t t-out=\"object.name\"/></strong> with <strong> <t t-"
+"out=\"object.rating_get_rated_partner_id().name\"/></strong>.</p>\n"
+"                <p>We appreciate your feedback. It helps us to improve "
+"continuously.</p>\n"
+"            </td></tr>\n"
+"            <tr><td style=\"padding:10px 20px\">\n"
+"                <table summary=\"o_mail_notification\" style=\"width:100%;"
+"border-top:1px solid #e1e1e1;\">\n"
+"                    <tr>\n"
+"                        <td style=\"text-align:center;\">\n"
+"                            <h2 style=\"font-weight:300;font-size:18px;\">\n"
+"                                Tell us how you feel about our service:\n"
+"                            </h2>\n"
+"                            <div style=\"text-color: #888888\">(click on one "
+"of these smileys)</div>\n"
+"                        </td>\n"
+"                    </tr>\n"
+"                    <tr>\n"
+"                        <td style=\"padding:10px 10px;\">\n"
+"                            <table style=\"width:100%;text-align:center;\">\n"
+"                                <tr>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/5\">\n"
+"                                            <img alt=\"Satisfied\" src=\"/"
+"rating/static/src/img/rating_5.png\" title=\"Satisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/3\">\n"
+"                                            <img alt=\"Not satisfied\" src="
+"\"/rating/static/src/img/rating_3.png\" title=\"Not satisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/1\">\n"
+"                                            <img alt=\"Highly Dissatisfied\" "
+"src=\"/rating/static/src/img/rating_1.png\" title=\"Highly Dissatisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                </tr>\n"
+"                            </table>\n"
+"                        </td>\n"
+"                    </tr>\n"
+"                </table>\n"
+"            </td></tr>\n"
+"        </tbody>\n"
+"    </table>\n"
+"    <table style=\"width:600px;margin:auto;text-align:center;font-size:12px;"
+"\">\n"
+"        <tbody>\n"
+"            <tr><td style=\"padding-top:10px;color:#afafaf;\">\n"
+"                <p>This Patient survey has been sent because your Appoitment "
+"has been Completed.</p>\n"
+"            </td></tr>\n"
+"        </tbody>\n"
+"    </table>\n"
+"</div>\n"
+"            "
+msgstr ""
+"<div style=\"background:#F0F0F0;color:#515166;padding:10px 0px;font-family:"
+"Arial,Helvetica,sans-serif;font-size:14px;\">\n"
+"    <t t-set=\"access_token\" t-value=\"object.rating_get_access_token()\"/"
+">\n"
+"    <table style=\"width:600px;margin:5px auto;\">\n"
+"        <tbody>\n"
+"            <tr><td>\n"
+"                <a href=\"/\"><img src=\"/web/binary/company_logo\" style="
+"\"vertical-align:baseline;max-width:100px;\"/></a>\n"
+"            </td><td style=\"text-align:right;vertical-align:middle;\">\n"
+"                    Encuesta de Satisfacción\n"
+"            </td></tr>\n"
+"\n"
+"        </tbody>\n"
+"    </table>\n"
+"    <table style=\"width:600px;margin:0px auto;background:white;border:1px "
+"solid #e1e1e1;\">\n"
+"        <tbody>\n"
+"            <tr><td style=\"padding:15px 20px 10px 20px;\">\n"
+"                <p>Hola Estimado,</p>\n"
+"                <p>Tómese un momento para calificar nuestros servicios "
+"relacionados con la cita. <strong> <t t-out=\"object.name\"/></strong> con "
+"<strong> <t t-out=\"object.rating_get_rated_partner_id().name\"/></strong>.</"
+"p>\n"
+"                <p>Agradecemos sus comentarios. Nos ayuda a mejorar "
+"continuamente.</p>\n"
+"            </td></tr>\n"
+"            <tr><td style=\"padding:10px 20px\">\n"
+"                <table summary=\"o_mail_notification\" style=\"width:100%;"
+"border-top:1px solid #e1e1e1;\">\n"
+"                    <tr>\n"
+"                        <td style=\"text-align:center;\">\n"
+"                            <h2 style=\"font-weight:300;font-size:18px;\">\n"
+"                                Díganos cómo se siente acerca de nuestro "
+"servicio:\n"
+"                            </h2>\n"
+"                            <div style=\"text-color: #888888”>(haga click en "
+"una de la caritas)</div>\n"
+"                        </td>\n"
+"                    </tr>\n"
+"                    <tr>\n"
+"                        <td style=\"padding:10px 10px;\">\n"
+"                            <table style=\"width:100%;text-align:center;\">\n"
+"                                <tr>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/5\">\n"
+"                                            <img alt=\"Satisfied\" src=\"/"
+"rating/static/src/img/rating_5.png\" title=\"Satisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/3\">\n"
+"                                            <img alt=\"Not satisfied\" src="
+"\"/rating/static/src/img/rating_3.png\" title=\"Not satisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                    <td>\n"
+"                                        <a t-attf-href=\"/rate/"
+"{{ access_token }}/1\">\n"
+"                                            <img alt=\"Highly Dissatisfied\" "
+"src=\"/rating/static/src/img/rating_1.png\" title=\"Highly Dissatisfied\"/>\n"
+"                                        </a>\n"
+"                                    </td>\n"
+"                                </tr>\n"
+"                            </table>\n"
+"                        </td>\n"
+"                    </tr>\n"
+"                </table>\n"
+"            </td></tr>\n"
+"        </tbody>\n"
+"    </table>\n"
+"    <table style=\"width:600px;margin:auto;text-align:center;font-size:12px;"
+"\">\n"
+"        <tbody>\n"
+"            <tr><td style=\"padding-top:10px;color:#afafaf;\">\n"
+"                <p>Se le envió esta encuesta porque se completó su cita.</"
+"p>\n"
+"            </td></tr>\n"
+"        </tbody>\n"
+"    </table>\n"
+"</div>\n"
+"            "
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.hr_department_view_kanban
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.physician_kanban_view
+msgid "<i class=\"fa fa-smile-o\"/> No rating yet"
+msgstr "<i class=\"fa fa-smile-o\"/> Sin calificación aún"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.res_config_settings_view_form
+msgid "<span class=\"o_form_label\">Appointment Rating Mail template</span>"
+msgstr ""
+"<span class=\"o_form_label\">Plantilla de correo de Rating de citas</span>"
+
+#. module: acs_hms_rating
+#: model:ir.model,name:acs_hms_rating.model_hms_appointment
+msgid "Appointment"
+msgstr "Cita"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_res_company__appointment_rating_mail_template_id
+#: model:ir.model.fields,field_description:acs_hms_rating.field_res_config_settings__appointment_rating_mail_template_id
+msgid "Appointment Rating Mail Template"
+msgstr "Plantilla de correo de clasificación de citas"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.res_config_settings_view_form
+msgid "Appointment Rating Request."
+msgstr "Solicitud de Rating de cita."
+
+#. module: acs_hms_rating
+#: model:mail.template,name:acs_hms_rating.appointment_patient_rating_request_email_template
+msgid "Appointment: Rating Request"
+msgstr "Solicitud de Rating de cita."
+
+#. module: acs_hms_rating
+#: model:ir.model,name:acs_hms_rating.model_res_config_settings
+msgid "Config Settings"
+msgstr "Ajustes"
+
+#. module: acs_hms_rating
+#: model:ir.model,name:acs_hms_rating.model_hr_department
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.rating_rating_view_search_hms
+msgid "Department"
+msgstr "Departamento"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_physician__percentage_satisfaction_appointment
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hr_department__percentage_satisfaction_appointment
+msgid "Happy % on Appointment"
+msgstr "Feliz % en Cita"
+
+#. module: acs_hms_rating
+#: model:ir.model,name:acs_hms_rating.model_res_company
+msgid "Hospital"
+msgstr "Hospital"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.rating_rating_view_search_hms
+msgid "Last 30 days"
+msgstr "Últimos 30 días"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.hr_department_view_kanban
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.physician_kanban_view
+msgid "Percentage of happy ratings."
+msgstr "Porcentaje de calificaciones felices."
+
+#. module: acs_hms_rating
+#: model:ir.model,name:acs_hms_rating.model_hms_physician
+msgid "Physician"
+msgstr "Profesional"
+
+#. module: acs_hms_rating
+#: model:ir.actions.act_window,name:acs_hms_rating.action_view_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_ids
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.res_config_settings_view_form
+msgid "Rating"
+msgstr "Rating"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_avg
+msgid "Rating Average"
+msgstr "Calificación Promedio"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_last_feedback
+msgid "Rating Last Feedback"
+msgstr "Calificación de los últimos comentarios"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_last_image
+msgid "Rating Last Image"
+msgstr "Imagen de la última calificación"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_last_value
+msgid "Rating Last Value"
+msgstr "Último valor de Calificación"
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,field_description:acs_hms_rating.field_hms_appointment__rating_count
+msgid "Rating count"
+msgstr "Recuento de calificaciones"
+
+#. module: acs_hms_rating
+#: model_terms:ir.ui.view,arch_db:acs_hms_rating.rating_rating_view_search_hms
+msgid "Rating for Appointment"
+msgstr "Rating para cita."
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,help:acs_hms_rating.field_hms_appointment__rating_last_feedback
+msgid "Reason of the rating"
+msgstr "Motivo de la calificación"
+
+#. module: acs_hms_rating
+#: model_terms:ir.actions.act_window,help:acs_hms_rating.action_view_hms_rating
+msgid "There is no rating for this object at the moment."
+msgstr "No hay ninguna calificación para este objeto en este momento."
+
+#. module: acs_hms_rating
+#: model:ir.model.fields,help:acs_hms_rating.field_res_company__appointment_rating_mail_template_id
+#: model:ir.model.fields,help:acs_hms_rating.field_res_config_settings__appointment_rating_mail_template_id
+msgid "This will set the default mail template for Appointment Rating Request."
+msgstr ""
+"Esto establecerá la plantilla de correo predeterminada para solicitud de "
+"calificación de cita."
+
+#. module: acs_hms_rating
+#: model:mail.template,subject:acs_hms_rating.appointment_patient_rating_request_email_template
+msgid "{{ object.company_id.name }}: Appointment Rating Request"
+msgstr "{{ object.company_id.name }}: Solicitud de rating de citas"
+
+```
+
+Static:
+  File: static/description/index.html
+  Content:
+```
+<head>
+  <style>
+      .backgrounds{background-color:#fff; color:#0B80E6}
+  </style>
+</head>
+
+<section class="oe_container">
+    <div class="mt32 mb32">
+        <div style="background-color: #2d9f9d; background-image: linear-gradient(#918c8c, #2d9f9d); background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%); border-radius: 10px 10px 10px 10px; min-height: 160px;">
+            <div class="text-white font-weight-bold" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                <div class="pt-2 text-center">
+                    <span>
+                    <span class="pt-2 text-center" style="font-size:27px;">Almighty Consulting Solutions Pvt. Ltd.</span><br/>
+                </div>
+                <div class="row mt16">
+                    <div class="col-4 text-center">
+                        <span>Supported Editions</span><br/> 
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Community 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Enterprise 
+                        </span>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <a href="https://www.almightycs.com" target="_blank">
+                            <img src="almightycs.png" width="80" height="auto">
+                        </a>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <span>Supported Hostings <br/></span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Odoo.sh 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Cloud
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>On Premise 
+                        </span><br/>
+                        <span class="pt-2 text-center" style="font-size:12px;">App can not be used on odoo online.</span><br/>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+ 
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12 oe_mt32">
+            <h3 class="oe_slogan">Patient Rating in Hospital Management System</h3><h4><br/></h4>
+        </div>
+    </div> 
+</section>
+
+<section class="oe_container mt16">
+    <div class='text-center'>
+        <h2> Detailed Description of Module</h2>
+    </div>
+    <div class="panel-body">
+        <div class="alert alert-info">
+            <h3>
+                <a data-toggle="collapse" href="#acs_lab"><i class="fa fa-plus-circle"></i></a>
+                <b> Patient Rating in Hospital Management System</b>
+                <b style="float:right"><a href="http://www.almightycs.com" target="_blank">By ACS </b></a>
+            </h3>
+ 
+            <h4><i class="fa fa-hand-o-right text-success"></i> All Basic Hospital Management functionality from Base Module <a href="https://apps.odoo.com/apps/modules/15.0/acs_hms/"> Check it Here</a>.</h4>
+            <h4><i class="fa fa-hand-o-right text-success"></i> Manage Patient Rating in Appointment.</h4>
+            <h4><i class="fa fa-hand-o-right text-success"></i> When Appointment is completed it will auto send mail to patient for rating.</h4>
+            <h4><i class="fa fa-hand-o-right text-success"></i> Get Doctor Average rating.</h4>
+            <h4><i class="fa fa-hand-o-right text-success"></i> Get Department Average rating.</h4>
+        </div>
+        <div id="acs_veterinary" class="panel-collapse collapse in" class="oe_span12">            
+        </div>
+        <br/>
+        <br/>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <h4 class="oe_slogan"><a href="http://www.almightycs.com">Almighty Consulting Solutions Pvt. Ltd.</a> </h4>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12">
+            <h3 class="oe_slogan">Other Configuration</h3>
+            <p class="oe_slogan">To use this module no technical knowledge is required. Just install module and functionality is ready to use. For more customization and help contact us.</p>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span6">
+            <div class="oe_demo o_picture o_screenshot">
+                <a href="https://www.almightycs.com" target="_blank">
+                    <img src="acs.png" width="200" height="auto">
+                </a>
+                <div class="oe_demo_footer oe_centeralign">Meet Us</div>
+            </div>
+        </div>
+        <div class="oe_span6">
+            <br/><br/>
+            <h2 class="oe_slogan">Do you need help?</h2>
+            <h3 class="oe_slogan">
+                Let's offer you the best services!
+            </h3>
+            <p class="oe_mt32 text-center">
+                Contact us by our official channels.
+            </p>
+            <p class="oe_mt32 text-center">
+                Skype: turkesh4friends 
+            </p>
+            <div class="oe_spaced">
+                <ul class="text-center list-inline">
+                    <li>
+                        <a href="https://www.linkedin.com/organization-guest/company/almighty-consulting-services" Target="_blank"><i class="fa fa-linkedin-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://www.facebook.com/AlmightyCS.ERP" Target="_blank"><i class="fa fa-facebook-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://github.com/tpa-odoo" Target="_blank"><i class="fa fa-github-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="mailto:info@almightycs.com" Target="_blank"><i class="fa fa-envelope-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://twitter.com/_AlmightyCS" Target="_blank" ><i class="fa fa-twitter-square fa-xs backgrounds"></i></a>
+                    </li>
+
+                    <li>
+                        <a title="Contact us" data-toggle="tooltip" data-placement="left" Target="_blank" href="https://www.almightycs.com/contactus"><i class="fa fa-globe fa-xs backgrounds"></i></a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+<section class="oe_container">
+
+    <div data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: fixed;
+            bottom: 10px;
+            right: 20px;
+            z-index: 1000;
+            box-shadow: 1px 2px 11px rgba(0, 0, 0, 0.3), -5px 7px 12px rgba(0, 0, 0, 0.22);
+            cursor: pointer;">
+        <span class="fa fa-2x fa-handshake-o"></span>
+    </div>
+    
+    <div class="collapse show" id="contactus-floating" style="z-index: 1006; position: fixed; bottom: 10px; right: 20px;">
+        <div style="width:246px; overflow: hidden;">
+            <div class="text-center acs-contactus-close" data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+                    width: 25px;
+                    height: 25px;
+                    margin-bottom: -25px;
+                    display: flex;
+                    color: white;
+                    align-items: center;
+                    justify-content: center;
+                    position: relative;
+                    z-index: 1000;
+                    cursor: pointer;">
+                <i class="fa fa-times"></i>
+            </div>
+            <div class="acs-contactus-data" style="
+                    margin-top: -17px;
+                    background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+                    border-radius: 10px 10px 10px 10px;
+                    padding-bottom: 10px;
+                    height: 106px;">
+                <div class="text-center" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                    <span class="pt-2 text-white font-weight-bold" style="">Contact AlmightyCS</span>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; font-size: 14px;">  
+                    <a href="skype:turkesh4friends" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-skype" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Skype</span>
+                    </a>
+                    <a href="https://www.almightycs.com" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-globe fa-spin" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Website</span>
+                    </a>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; 
+                    font-size: 14px; 
+                    padding-bottom: 20px; 
+                    padding-top: 22px;"> 
+                    <a href="mailto:info@almightycs.com" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-envelope" style="font-size: 19px;"></i>
+                        <span class="pt-2 font-weight-bold">Email</span>
+                    </a>
+                    <a href="https://www.almightycs.com/contactus" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-handshake-o" style="font-size: 20px;"></i>
+                        <span class="pt-2 font-weight-bold">Contactus</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div> 
+
+</section>
+
+```
+
+Doc:
+  File: doc/changelog.rst
+  Content:
+```
+`1.0.1                                                        [24/10/2023]`
+***************************************************************************
+- Migrated Module for v17
+```
+

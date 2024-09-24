@@ -1,0 +1,1924 @@
+Addon: acs_hms_paediatric
+
+Manifest: __manifest__.py
+Content:
+```python
+# -*- coding: utf-8 -*-
+#╔══════════════════════════════════════════════════════════════════════╗
+#║                                                                      ║
+#║                  ╔═══╦╗       ╔╗  ╔╗     ╔═══╦═══╗                   ║
+#║                  ║╔═╗║║       ║║ ╔╝╚╗    ║╔═╗║╔═╗║                   ║
+#║                  ║║ ║║║╔╗╔╦╦══╣╚═╬╗╔╬╗ ╔╗║║ ╚╣╚══╗                   ║
+#║                  ║╚═╝║║║╚╝╠╣╔╗║╔╗║║║║║ ║║║║ ╔╬══╗║                   ║
+#║                  ║╔═╗║╚╣║║║║╚╝║║║║║╚╣╚═╝║║╚═╝║╚═╝║                   ║
+#║                  ╚╝ ╚╩═╩╩╩╩╩═╗╠╝╚╝╚═╩═╗╔╝╚═══╩═══╝                   ║
+#║                            ╔═╝║     ╔═╝║                             ║
+#║                            ╚══╝     ╚══╝                             ║
+#║                  SOFTWARE DEVELOPED AND SUPPORTED BY                 ║
+#║                ALMIGHTY CONSULTING SOLUTIONS PVT. LTD.               ║
+#║                      COPYRIGHT (C) 2016 - TODAY                      ║
+#║                      https://www.almightycs.com                      ║
+#║                                                                      ║
+#╚══════════════════════════════════════════════════════════════════════╝
+{
+    'name': 'Hospital Management System for Paediatrics ( Pediatric )',
+    'version': '1.0.1',
+    'summary': 'Hospital Management System for Paediatrics',
+    'description': """
+                Hospital Management System for Paediatrics pediatric. HealthCare Gynec system for hospitals
+                With this module you can manage :
+                - Child Patients
+                - Maintain Child Growth Register
+                - Child Vaccination
+                acs hms almightycs
+    """,
+    'category': 'Medical',
+    'author': 'Almighty Consulting Solutions Pvt. Ltd.',
+    'support': 'info@almightycs.com',
+    'website': 'https://www.almightycs.com',
+    'license': 'OPL-1',
+    'depends': ['acs_hms_vaccination'],
+    'data': [
+        'security/security.xml',
+        'security/ir.model.access.csv',
+        'data/weight_data.xml',
+        'data/height_data.xml',
+        'data/head_data.xml',
+        # 'data/data.xml',
+        'views/acs_hms_views.xml',
+        'views/hms_paediatric_view.xml',
+        'views/menu_item.xml',
+    ],
+    'images': [
+        'static/description/hms_paediatric_almightycs_cover.jpeg',
+    ],
+    'installable': True,
+    'application': True,
+    'sequence': 1,
+    'price': 101,
+    'currency': 'USD',
+}
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+__init__.py:
+Content:
+```python
+# -*- coding: utf-8 -*-
+
+from . import models
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+Models:
+  File: models/__init__.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from . import acs_hms
+from . import hms_paediatric
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+
+```
+
+  File: models/acs_hms.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from odoo import api, fields, models, _
+import json
+from dateutil.relativedelta import relativedelta
+from odoo.tools import DEFAULT_SERVER_DATE_FORMAT as DF, DEFAULT_SERVER_DATETIME_FORMAT as DTF
+from odoo.release import version
+
+
+class Appointment(models.Model):
+    _inherit = 'hms.appointment'
+
+    is_child = fields.Boolean(related="patient_id.is_child", string="Is Child")    
+    head_circum = fields.Float(related="evaluation_id.head_circum", string="Head Circumference")
+    acs_head_circum_name = fields.Char(related="evaluation_id.acs_head_circum_name", string='Patient Head Circumference unit of measure label')
+
+
+class AcsPatientEvaluation(models.Model):
+    _inherit = 'acs.patient.evaluation'
+
+    @api.depends('patient_id','patient_id.birthday','date')
+    def _get_age_months(self):
+        for rec in self:
+            if rec.patient_id.birthday:
+                delta = relativedelta(rec.date, rec.patient_id.birthday)
+                rec.age_month = (delta.years*12) + delta.months
+
+    age_month = fields.Float(compute="_get_age_months", string='Age(Months)', store=True)
+
+class ACSPatient (models.Model):
+    _inherit = "hms.patient"
+
+    def get_line_graph_datas(self, record_type):
+        if record_type=='height':
+            rec_name = 'Height'
+            child_value = self.birth_height
+        if record_type=='weight':
+            rec_name = 'Weight'
+            child_value = self.birth_weight
+        if record_type=='head_circum':
+            rec_name = 'Head Circumference'
+            child_value = self.birth_head_circum
+
+        normal_data = []
+        child_data = []
+        normal_record_datas = self.env['acs.growth.chart.data'].search([('record_type','=',record_type)])
+
+        for normal_record_data in normal_record_datas:
+            #Value based on gender
+            normal_record_data_value = normal_record_data.male_value if self.gender=='male' else normal_record_data.female_value
+            normal_data.append({'x': normal_record_data.age, 'y':normal_record_data_value, 'name': 'Normal %s' % rec_name})
+            child_record_data = self.env['acs.patient.evaluation'].search([('patient_id','=',self.id), ('age_month','=',int(normal_record_data.age))], limit=1)
+            if child_record_data:
+                if record_type=='height' and child_record_data.height:
+                    child_value = child_record_data.height
+                if record_type=='weight' and child_record_data.weight:
+                    child_value = child_record_data.weight
+                if record_type=='head_circum' and child_record_data.head_circum:
+                    child_value = child_record_data.head_circum
+            child_data.append({'x': normal_record_data.age, 'y':child_value, 'name': 'Child %s' % rec_name})
+
+        [normal_graph_title, normal_graph_key] = ['Normal %s Growth Chart' % rec_name, _('Normal %s Growth Chart' % rec_name)]
+        [child_graph_title, child_graph_key] = ['Child %s Growth Chart' % rec_name, _('Child %s Growth Chart' % rec_name)]
+        
+        normal_color = '#875A7B' if '+e' in version else '#7c7bad'
+        child_color = 'green'
+
+        return [
+            {'values': normal_data, 'title': normal_graph_title, 'key': normal_graph_key, 'area': False, 'color': normal_color},
+            {'values': child_data, 'title': child_graph_title, 'key': child_graph_key, 'area': False, 'color': child_color}
+        ]
+
+    def _compute_dashboard_data(self):
+        self.patient_height_growth = json.dumps(self.get_line_graph_datas(record_type='height'))
+        self.patient_weight_growth = json.dumps(self.get_line_graph_datas(record_type='weight'))
+        self.patient_head_circum_graph = json.dumps(self.get_line_graph_datas(record_type='head_circum'))
+
+    is_child = fields.Boolean("Is Child")
+    birth_weight = fields.Float(string='Birth Weight', help="Weight of Child")
+    birth_height = fields.Float(string='Birth Height', help="Height of Child")
+    birth_head_circum = fields.Float('Birth Head Circumference')
+
+    patient_height_growth = fields.Text(compute='_compute_dashboard_data')
+    patient_weight_growth = fields.Text(compute='_compute_dashboard_data')
+    patient_head_circum_graph = fields.Text(compute='_compute_dashboard_data')
+    head_circum = fields.Float(related="last_evaluation_id.head_circum", string="Head Circumference")
+    acs_head_circum_name = fields.Char(related="last_evaluation_id.acs_head_circum_name", string='Patient Head Circumference unit of measure label')
+
+    def show_growth_chart(self):
+        action = self.env["ir.actions.actions"]._for_xml_id("acs_hms_paediatric.action_growth_chart")
+        action['domain'] = [('id', '=', self.id)]
+        return action
+
+
+class HrDepartment(models.Model): 
+    _inherit = "hr.department"
+
+    department_type = fields.Selection(selection_add=[('paediatric','Paediatric')])
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: models/hms_paediatric.py
+  Content:
+```
+    # -*- coding: utf-8 -*-
+import time
+from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
+from odoo import api, fields, models ,_
+from odoo.exceptions import UserError
+
+
+class AcsChartData(models.Model):
+    _name = 'acs.growth.chart.data'
+    _description =  'Chart Data'
+    _rec_name = 'age'
+    _order = 'sequence, id'
+
+    age = fields.Float('Age')
+    sequence = fields.Integer(string='Sequence', default=10)
+    male_value = fields.Float(string ='Normal Male Value')
+    female_value = fields.Float(string ='Normal Female Value')
+    record_type = fields.Selection([
+        ('weight','Weight'),
+        ('height','Height'),
+        ('head_circum','Head Circumference'),
+        ], 'Type', default='weight')
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:   
+```
+
+Views:
+  File: views/acs_hms_views.xml
+  Content:
+```
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+
+    <!-- Growth Chart -->
+    <record id="user_growth_chart_kanban_view" model="ir.ui.view">
+        <field name="name">Growth Chart</field>
+        <field name="model">hms.patient</field>
+        <field name="type">kanban</field>
+        <field name="priority">20</field>
+        <field name="arch" type="xml">
+            <kanban create="false" class="o_kanban_dashboard o_acs_hms_kanban">
+                <field name="patient_height_growth"/>
+                <field name="patient_weight_growth"/>
+                <field name="patient_head_circum_graph"/>
+                <templates>
+                    <t t-name="kanban-box">
+                        <div id="acs_hms_dashboard" class="o_kanban_view o_kanban_record">
+
+                            <div class="row mb8">
+                                <div class="col-lg-12 col-md-12 col-sm-12 col-xs-12">
+                                    <div t-attf-class="card acs-card card-">
+                                        <div class="card-heading">
+                                            <i class="fa fa-area-chart" aria-label="Info" title="Weight Chart"></i> Weight Chart
+                                        </div>
+                                        <div class="card-body o_acs_AcsDashboardGraph">
+                                            <t t-name="WightChart">
+                                                <field name="patient_weight_growth" ylabel="Weight (kg)" xlabel="Age (Months)" widget="AlmightyHmsGraph"/>
+                                            </t>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row mb8">
+                                <div class="col-lg-12 col-md-12 col-sm-12 col-xs-12">
+                                    <div t-attf-class="card acs-card card-">
+                                        <div class="card-heading">
+                                            <i class="fa fa-area-chart" aria-label="Info" title="Height Chart"></i> Height Chart
+                                        </div>
+                                        <div class="card-body o_acs_AcsDashboardGraph">
+                                            <t t-name="HeightChart">
+                                                <field name="patient_height_growth" ylabel="Height (cm)" xlabel="Age (Months)" widget="AlmightyHmsGraph"/>
+                                            </t>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-lg-12 col-md-12 col-sm-12 col-xs-12">
+                                    <div t-attf-class="card acs-card card-">
+                                        <div class="card-heading">
+                                            <i class="fa fa-area-chart" aria-label="Info" title="Height Chart"></i> Head Circumference
+                                        </div>
+                                        <div class="card-body o_acs_AcsDashboardGraph">
+                                            <t t-name="HeadCircumChart">
+                                                <field name="patient_head_circum_graph" ylabel="Head Circumference (cm)" xlabel="Age (Months)" widget="AlmightyHmsGraph"/>
+                                            </t>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <record id="action_growth_chart" model="ir.actions.act_window">
+        <field name="name">Growth Chart</field>
+        <field name="res_model">hms.patient</field>
+        <field name="view_mode">kanban</field>
+        <field name="view_id" ref="user_growth_chart_kanban_view"/>
+        <field name="usage">menu</field>
+    </record>
+
+    <!-- Patient View -->
+    <record id="view_hms_patient_form_pediatric" model="ir.ui.view">
+        <field name="name">hms.patient.view.inherit.pediatric</field>
+        <field name="model">hms.patient</field>
+        <field name="inherit_id" ref="acs_hms.view_patient_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@name='button_box']" position="inside">
+                <button class="oe_inline oe_stat_button" type="object" name="show_growth_chart" title="Show Growth Chart" icon="fa-arrow-right" invisible="not is_child" string="Show Growth Chart" widget="statinfo">
+                </button>
+            </xpath> 
+
+            <xpath expr="//page[@name='clinical_ass']//label[@for='temp']" position="before">
+                <label for="head_circum"/>
+                <div class="o_row">
+                    <field name="head_circum"/>
+                    <span><field name="acs_head_circum_name"/></span>
+                </div>
+            </xpath>
+            <xpath expr="//group[@name='death_details']" position="after">
+                <group >
+                    <field name="is_child"/>
+                    <field name="birth_weight" invisible="not is_child"/>
+                </group>
+                <group>
+                    <field name="birth_height" invisible="not is_child"/>
+                    <field name="birth_head_circum" invisible="not is_child"/>
+                </group>
+            </xpath>
+
+        </field>
+    </record>
+
+    <record id="hms_action_child_patient" model="ir.actions.act_window">
+        <field name="name">Patient</field>
+        <field name="res_model">hms.patient</field>
+        <field name="view_mode">kanban,tree,form</field>
+        <field name="domain" eval="[('is_child','=',True)]"/>
+        <field name="context">{'default_is_child': True}</field>
+    </record>
+
+    <!-- Appointment View-->
+    <record id="view_hms_appointment_form" model="ir.ui.view">
+        <field name="name">hms.appointment.view.inherit</field>
+        <field name="model">hms.appointment</field>
+        <field name="inherit_id" ref="acs_hms.view_hms_appointment_form" />
+        <field name="arch" type="xml">
+            <field name="weight" position="after">
+                <field name="is_child" invisible="1"/>
+            </field>
+            <xpath expr="//page[@name='clinical_ass']//label[@for='temp']" position="before">
+                <label for="head_circum"/>
+                <div class="o_row">
+                    <field name="head_circum"/>
+                    <span><field name="acs_head_circum_name"/></span>
+                </div>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>
+
+```
+
+  File: views/hms_paediatric_view.xml
+  Content:
+```
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+
+    <record id="view_acs_growth_chart_data_search" model="ir.ui.view">
+        <field name="name">acs.growth.chart.data.search</field>
+        <field name="model">acs.growth.chart.data</field>
+        <field name="arch" type="xml">
+            <search string="Growth Chart Data">
+                <field name="age"/>
+                <field name="male_value"/>
+                <field name="female_value"/>
+                <field name="record_type"/>
+                <newline/>
+                <group expand="0" string="Group By...">
+                    <filter string="Type" name="record_type_groupby" domain="[]" context="{'group_by':'record_type'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="view_acs_growth_chart_data_tree" model="ir.ui.view">
+        <field name="name">acs.growth.chart.data.tree</field>
+        <field name="model">acs.growth.chart.data</field>
+        <field name="arch" type="xml">
+            <tree string="Growth Chart Data">
+                <field name="record_type" invisible="1"/>
+                <field name="age"/>
+                <field name="male_value"/>
+                <field name="female_value"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_acs_acs_growth_chart_data_form" model="ir.ui.view">
+        <field name="name">acs.growth.chart.data.form</field>
+        <field name="model">acs.growth.chart.data</field>
+        <field name="arch" type="xml">
+            <form string="Growth Chart Data">
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="age"/>
+                            <field name="male_value"/>
+                            <field name="female_value"/>
+                        </group>
+                        <group>
+                            <field name="sequence"/>
+                            <field name="record_type"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_acs_hms_weight_chart_data" model="ir.actions.act_window" >
+        <field name="name">Weight Growth Data</field>
+        <field name="type">ir.actions.act_window</field>
+        <field name="res_model">acs.growth.chart.data</field>
+        <field name="view_mode">tree,form</field>
+        <field name="domain">[('record_type','=','weight')]</field>
+        <field name="context">{'default_record_type': 'weight'}</field>
+    </record>
+
+    <record id="action_acs_hms_height_chart_data" model="ir.actions.act_window">
+        <field name="name">Height Growth Data</field>
+        <field name="type">ir.actions.act_window</field>
+        <field name="res_model">acs.growth.chart.data</field>
+        <field name="view_mode">tree,form</field>
+        <field name="domain">[('record_type','=','height')]</field>
+        <field name="context">{'default_record_type': 'height'}</field>
+    </record>
+
+    <record id="action_acs_hms_head_circum_chart_data" model="ir.actions.act_window">
+        <field name="name">Head Circumference Growth Data</field>
+        <field name="type">ir.actions.act_window</field>
+        <field name="res_model">acs.growth.chart.data</field>
+        <field name="view_mode">tree,form</field>
+        <field name="domain">[('record_type','=','head_circum')]</field>
+        <field name="context">{'default_record_type': 'head_circum'}</field>
+    </record>
+
+</odoo>
+```
+
+  File: views/menu_item.xml
+  Content:
+```
+<?xml version="1.0" ?>
+<odoo>
+
+    <menuitem name="Paediatric" id="menu_acs_paediatric" sequence="65" groups="acs_hms_paediatric.group_hms_user_paediatric" web_icon="acs_hms_paediatric,static/description/icon.png"/>
+
+    <menuitem name="Patients" id="menu_acs_patient" parent="menu_acs_paediatric" action="hms_action_child_patient" sequence="1"/>
+
+    <menuitem name="Configuration" id="menu_acs_paediatric_configuration" parent='menu_acs_paediatric' sequence="100" groups="acs_hms.group_hms_doctor"/>
+    <menuitem name="Weight Growth" id="menu_acs_hms_weight_chart_data" parent='menu_acs_paediatric_configuration' sequence="1" action="action_acs_hms_weight_chart_data"/>
+    <menuitem name="Height Growth" id="menu_acs_hms_height_chart_data" parent='menu_acs_paediatric_configuration' sequence="2" action="action_acs_hms_height_chart_data"/>
+    <menuitem name="Head Circumference Growth" id="menu_acs_hms_head_circum_chart_data" parent='menu_acs_paediatric_configuration' sequence="3" action="action_acs_hms_head_circum_chart_data"/>
+
+</odoo>
+```
+
+Security:
+  File: security/security.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">
+
+        <record id="group_hms_user_paediatric" model="res.groups">
+            <field name="name">Paediatric User</field>
+            <field name="category_id" ref="acs_hms_base.module_category_hms_speciality"/>
+            <field name="implied_ids" eval="[(4, ref('acs_hms_base.group_hms_user'))]"/>
+            <field name="users" eval="[(4, ref('base.user_root')), (4, ref('base.user_admin'))]"/>
+        </record>
+
+    </data>
+</odoo>
+```
+
+Data:
+  File: data/data.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+
+        <record id="department_paediatric" model="hr.department">
+            <field name="name">Paediatric</field>
+            <field name="patient_department">True</field>
+            <field name="department_type">paediatric</field>
+            <field name="image" type="base64" file="acs_hms_paediatric/static/description/icon.png"/>
+        </record>
+
+    </data>
+</odoo>
+```
+
+  File: data/head_data.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_00">
+            <field name="record_type">head_circum</field>
+            <field name="age">0</field>
+            <field name="male_value">34.5</field>
+            <field name="female_value">33.9</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_01">
+            <field name="record_type">head_circum</field>
+            <field name="age">1</field>
+            <field name="male_value">37.3</field>
+            <field name="female_value">36.5</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_02">
+            <field name="record_type">head_circum</field>
+            <field name="age">2</field>
+            <field name="male_value">39.1</field>
+            <field name="female_value">38.3</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_03">
+            <field name="record_type">head_circum</field>
+            <field name="age">3</field>
+            <field name="male_value">40.5</field>
+            <field name="female_value">39.5</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_04">
+            <field name="record_type">head_circum</field>
+            <field name="age">4</field>
+            <field name="male_value">41.6</field>
+            <field name="female_value">40.6</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_05">
+            <field name="record_type">head_circum</field>
+            <field name="age">5</field>
+            <field name="male_value">42.6</field>
+            <field name="female_value">41.5</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_06">
+            <field name="record_type">head_circum</field>
+            <field name="age">6</field>
+            <field name="male_value">43.3</field>
+            <field name="female_value">42.2</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_07">
+            <field name="record_type">head_circum</field>
+            <field name="age">7</field>
+            <field name="male_value">44.0</field>
+            <field name="female_value">42.8</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_08">
+            <field name="record_type">head_circum</field>
+            <field name="age">8</field>
+            <field name="male_value">44.5</field>
+            <field name="female_value">43.4</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_09">
+            <field name="record_type">head_circum</field>
+            <field name="age">9</field>
+            <field name="male_value">45.0</field>
+            <field name="female_value">43.8</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_10">
+            <field name="record_type">head_circum</field>
+            <field name="age">10</field>
+            <field name="male_value">45.4</field>
+            <field name="female_value">44.2</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_11">
+            <field name="record_type">head_circum</field>
+            <field name="age">11</field>
+            <field name="male_value">45.8</field>
+            <field name="female_value">44.6</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_12">
+            <field name="record_type">head_circum</field>
+            <field name="age">12</field>
+            <field name="male_value">46.1</field>
+            <field name="female_value">44.9</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_13">
+            <field name="record_type">head_circum</field>
+            <field name="age">13</field>
+            <field name="male_value">46.3</field>
+            <field name="female_value">45.2</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_14">
+            <field name="record_type">head_circum</field>
+            <field name="age">14</field>
+            <field name="male_value">46.6</field>
+            <field name="female_value">45.4</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_15">
+            <field name="record_type">head_circum</field>
+            <field name="age">15</field>
+            <field name="male_value">46.8</field>
+            <field name="female_value">45.7</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_16">
+            <field name="record_type">head_circum</field>
+            <field name="age">16</field>
+            <field name="male_value">47.0</field>
+            <field name="female_value">45.9</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_17">
+            <field name="record_type">head_circum</field>
+            <field name="age">17</field>
+            <field name="male_value">47.2</field>
+            <field name="female_value">46.1</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_18">
+            <field name="record_type">head_circum</field>
+            <field name="age">18</field>
+            <field name="male_value">47.4</field>
+            <field name="female_value">46.2</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_19">
+            <field name="record_type">head_circum</field>
+            <field name="age">19</field>
+            <field name="male_value">47.5</field>
+            <field name="female_value">46.4</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_20">
+            <field name="record_type">head_circum</field>
+            <field name="age">20</field>
+            <field name="male_value">47.7</field>
+            <field name="female_value">46.6</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_21">
+            <field name="record_type">head_circum</field>
+            <field name="age">21</field>
+            <field name="male_value">47.8</field>
+            <field name="female_value">46.7</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_22">
+            <field name="record_type">head_circum</field>
+            <field name="age">22</field>
+            <field name="male_value">48.0</field>
+            <field name="female_value">46.9</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_23">
+            <field name="record_type">head_circum</field>
+            <field name="age">23</field>
+            <field name="male_value">48.1</field>
+            <field name="female_value">47.0</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_head_data_24">
+            <field name="record_type">head_circum</field>
+            <field name="age">24</field>
+            <field name="male_value">48.3</field>
+            <field name="female_value">47.2</field>
+        </record>
+
+    </data>
+</odoo>
+```
+
+  File: data/height_data.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_00">
+            <field name="record_type">height</field>
+            <field name="age">0</field>
+            <field name="male_value">49.9</field>
+            <field name="female_value">49.1</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_01">
+            <field name="record_type">height</field>
+            <field name="age">1</field>
+            <field name="male_value">54.7</field>
+            <field name="female_value">53.7</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_02">
+            <field name="record_type">height</field>
+            <field name="age">2</field>
+            <field name="male_value">58.4</field>
+            <field name="female_value">57.1</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_03">
+            <field name="record_type">height</field>
+            <field name="age">3</field>
+            <field name="male_value">61.4</field>
+            <field name="female_value">59.8</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_04">
+            <field name="record_type">height</field>
+            <field name="age">4</field>
+            <field name="male_value">63.9</field>
+            <field name="female_value">62.1</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_05">
+            <field name="record_type">height</field>
+            <field name="age">5</field>
+            <field name="male_value">65.9</field>
+            <field name="female_value">64.0</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_06">
+            <field name="record_type">height</field>
+            <field name="age">6</field>
+            <field name="male_value">67.6</field>
+            <field name="female_value">65.7</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_07">
+            <field name="record_type">height</field>
+            <field name="age">7</field>
+            <field name="male_value">69.2</field>
+            <field name="female_value">67.3</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_08">
+            <field name="record_type">height</field>
+            <field name="age">8</field>
+            <field name="male_value">70.6</field>
+            <field name="female_value">68.7</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_09">
+            <field name="record_type">height</field>
+            <field name="age">9</field>
+            <field name="male_value">72.0</field>
+            <field name="female_value">70.1</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_10">
+            <field name="record_type">height</field>
+            <field name="age">10</field>
+            <field name="male_value">73.3</field>
+            <field name="female_value">71.5</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_11">
+            <field name="record_type">height</field>
+            <field name="age">11</field>
+            <field name="male_value">74.5</field>
+            <field name="female_value">72.8</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_12">
+            <field name="record_type">height</field>
+            <field name="age">12</field>
+            <field name="male_value">75.7</field>
+            <field name="female_value">74.0</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_13">
+            <field name="record_type">height</field>
+            <field name="age">13</field>
+            <field name="male_value">76.9</field>
+            <field name="female_value">75.2</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_14">
+            <field name="record_type">height</field>
+            <field name="age">14</field>
+            <field name="male_value">78</field>
+            <field name="female_value">76.4</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_15">
+            <field name="record_type">height</field>
+            <field name="age">15</field>
+            <field name="male_value">79.1</field>
+            <field name="female_value">77.5</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_16">
+            <field name="record_type">height</field>
+            <field name="age">16</field>
+            <field name="male_value">80.2</field>
+            <field name="female_value">78.6</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_17">
+            <field name="record_type">height</field>
+            <field name="age">17</field>
+            <field name="male_value">81.2</field>
+            <field name="female_value">79.7</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_18">
+            <field name="record_type">height</field>
+            <field name="age">18</field>
+            <field name="male_value">82.3</field>
+            <field name="female_value">80.7</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_19">
+            <field name="record_type">height</field>
+            <field name="age">19</field>
+            <field name="male_value">83.2</field>
+            <field name="female_value">81.7</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_20">
+            <field name="record_type">height</field>
+            <field name="age">20</field>
+            <field name="male_value">84.2</field>
+            <field name="female_value">82.7</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_21">
+            <field name="record_type">height</field>
+            <field name="age">21</field>
+            <field name="male_value">85.1</field>
+            <field name="female_value">83.7</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_22">
+            <field name="record_type">height</field>
+            <field name="age">22</field>
+            <field name="male_value">86.0</field>
+            <field name="female_value">84.6</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_23">
+            <field name="record_type">height</field>
+            <field name="age">23</field>
+            <field name="male_value">86.9</field>
+            <field name="female_value">85.5</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_height_data_24">
+            <field name="record_type">height</field>
+            <field name="age">24</field>
+            <field name="male_value">87.8</field>
+            <field name="female_value">86.4</field>
+        </record>
+
+    </data>
+</odoo>
+```
+
+  File: data/weight_data.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_00">
+            <field name="record_type">weight</field>
+            <field name="age">0</field>
+            <field name="male_value">3.3</field>
+            <field name="female_value">3.2</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_01">
+            <field name="record_type">weight</field>
+            <field name="age">1</field>
+            <field name="male_value">4.5</field>
+            <field name="female_value">4.2</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_02">
+            <field name="record_type">weight</field>
+            <field name="age">2</field>
+            <field name="male_value">5.6</field>
+            <field name="female_value">5.1</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_03">
+            <field name="record_type">weight</field>
+            <field name="age">3</field>
+            <field name="male_value">6.4</field>
+            <field name="female_value">5.8</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_04">
+            <field name="record_type">weight</field>
+            <field name="age">4</field>
+            <field name="male_value">7.0</field>
+            <field name="female_value">6.4</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_05">
+            <field name="record_type">weight</field>
+            <field name="age">5</field>
+            <field name="male_value">7.5</field>
+            <field name="female_value">6.9</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_06">
+            <field name="record_type">weight</field>
+            <field name="age">6</field>
+            <field name="male_value">7.9</field>
+            <field name="female_value">7.3</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_07">
+            <field name="record_type">weight</field>
+            <field name="age">7</field>
+            <field name="male_value">8.3</field>
+            <field name="female_value">7.6</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_08">
+            <field name="record_type">weight</field>
+            <field name="age">8</field>
+            <field name="male_value">8.6</field>
+            <field name="female_value">7.9</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_09">
+            <field name="record_type">weight</field>
+            <field name="age">9</field>
+            <field name="male_value">8.9</field>
+            <field name="female_value">8.2</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_10">
+            <field name="record_type">weight</field>
+            <field name="age">10</field>
+            <field name="male_value">9.2</field>
+            <field name="female_value">8.5</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_11">
+            <field name="record_type">weight</field>
+            <field name="age">11</field>
+            <field name="male_value">9.4</field>
+            <field name="female_value">8.7</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_12">
+            <field name="record_type">weight</field>
+            <field name="age">12</field>
+            <field name="male_value">9.6</field>
+            <field name="female_value">8.9</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_13">
+            <field name="record_type">weight</field>
+            <field name="age">13</field>
+            <field name="male_value">9.9</field>
+            <field name="female_value">9.2</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_14">
+            <field name="record_type">weight</field>
+            <field name="age">14</field>
+            <field name="male_value">10.1</field>
+            <field name="female_value">9.4</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_15">
+            <field name="record_type">weight</field>
+            <field name="age">15</field>
+            <field name="male_value">10.3</field>
+            <field name="female_value">9.6</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_16">
+            <field name="record_type">weight</field>
+            <field name="age">16</field>
+            <field name="male_value">10.5</field>
+            <field name="female_value">9.8</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_17">
+            <field name="record_type">weight</field>
+            <field name="age">17</field>
+            <field name="male_value">10.7</field>
+            <field name="female_value">10.0</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_18">
+            <field name="record_type">weight</field>
+            <field name="age">18</field>
+            <field name="male_value">10.9</field>
+            <field name="female_value">10.2</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_19">
+            <field name="record_type">weight</field>
+            <field name="age">19</field>
+            <field name="male_value">11.1</field>
+            <field name="female_value">10.4</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_20">
+            <field name="record_type">weight</field>
+            <field name="age">20</field>
+            <field name="male_value">11.3</field>
+            <field name="female_value">10.6</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_21">
+            <field name="record_type">weight</field>
+            <field name="age">21</field>
+            <field name="male_value">11.5</field>
+            <field name="female_value">10.9</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_22">
+            <field name="record_type">weight</field>
+            <field name="age">22</field>
+            <field name="male_value">11.8</field>
+            <field name="female_value">11.1</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_23">
+            <field name="record_type">weight</field>
+            <field name="age">23</field>
+            <field name="male_value">12.0</field>
+            <field name="female_value">11.3</field>
+        </record>
+
+        <record model="acs.growth.chart.data" id="growth_chart_weight_data_24">
+            <field name="record_type">weight</field>
+            <field name="age">24</field>
+            <field name="male_value">12.2</field>
+            <field name="female_value">11.5</field>
+        </record>
+
+    </data>
+</odoo>
+```
+
+I18n:
+  File: i18n/es.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_paediatric
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 14.0-20210330\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-04-09 16:58+0000\n"
+"PO-Revision-Date: 2021-04-09 12:01-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 2.4.2\n"
+"Last-Translator: \n"
+"Language: es\n"
+
+#. module: acs_hms_paediatric
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.user_growth_chart_kanban_view
+msgid ""
+"<i class=\"fa fa-area-chart\" aria-label=\"Info\" title=\"Height Chart\"/> "
+"Head Circumference"
+msgstr ""
+"<i class=\"fa fa-area-chart\" aria-label=\"Info\" title=\"Height Chart\"></"
+"i>Circunferencia de la cabeza"
+
+#. module: acs_hms_paediatric
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.user_growth_chart_kanban_view
+msgid ""
+"<i class=\"fa fa-area-chart\" aria-label=\"Info\" title=\"Height Chart\"/> "
+"Height Chart"
+msgstr ""
+"<i class=\"fa fa-area-chart\" aria-label=\"Info\" title=\"Height Chart\"></"
+"i>Gráfico de altura"
+
+#. module: acs_hms_paediatric
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.user_growth_chart_kanban_view
+msgid ""
+"<i class=\"fa fa-area-chart\" aria-label=\"Info\" title=\"Weight Chart\"/> "
+"Weight Chart"
+msgstr ""
+"<i class=\"fa fa-area-chart\" aria-label=\"Info\" title=\"Weight Chart\"></"
+"i>Tabla de peso"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__age
+msgid "Age"
+msgstr "Edad"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_appointment__age_month
+msgid "Age(Months)"
+msgstr "Edad (Meses)"
+
+#. module: acs_hms_paediatric
+#: model:ir.model,name:acs_hms_paediatric.model_hms_appointment
+msgid "Appointment"
+msgstr "Cita"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__birth_head_circum
+msgid "Birth Head Circumference"
+msgstr "Circunferencia de la cabeza al nacer"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__birth_height
+msgid "Birth Height"
+msgstr "Altura al nacer"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__birth_weight
+msgid "Birth Weight"
+msgstr "Peso del nacimiento"
+
+#. module: acs_hms_paediatric
+#: model:ir.model,name:acs_hms_paediatric.model_acs_growth_chart_data
+msgid "Chart Data"
+msgstr "Datos del gráfico"
+
+#. module: acs_hms_paediatric
+#: model:ir.ui.menu,name:acs_hms_paediatric.menu_acs_paediatric_configuration
+msgid "Configuration"
+msgstr "Configuración"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__create_uid
+msgid "Created by"
+msgstr "Creado por"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__create_date
+msgid "Created on"
+msgstr "Creado el"
+
+#. module: acs_hms_paediatric
+#: model:ir.model,name:acs_hms_paediatric.model_hr_department
+msgid "Department"
+msgstr "Departamento"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__display_name
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_appointment__display_name
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__display_name
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hr_department__display_name
+msgid "Display Name"
+msgstr "Nombre mostrado"
+
+#. module: acs_hms_paediatric
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.view_acs_growth_chart_data_search
+msgid "Group By..."
+msgstr "Agrupar por..."
+
+#. module: acs_hms_paediatric
+#: model:ir.actions.act_window,name:acs_hms_paediatric.action_growth_chart
+msgid "Growth Chart"
+msgstr "Gráfico de crecimiento"
+
+#. module: acs_hms_paediatric
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.view_acs_acs_growth_chart_data_form
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.view_acs_growth_chart_data_search
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.view_acs_growth_chart_data_tree
+msgid "Growth Chart Data"
+msgstr "Datos del gráfico de crecimiento"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_appointment__head_circum
+#: model:ir.model.fields.selection,name:acs_hms_paediatric.selection__acs_growth_chart_data__record_type__head_circum
+msgid "Head Circumference"
+msgstr "Circunferencia de la cabeza"
+
+#. module: acs_hms_paediatric
+#: model:ir.ui.menu,name:acs_hms_paediatric.menu_acs_hms_head_circum_chart_data
+msgid "Head Circumference Growth"
+msgstr "Crecimiento de la circunferencia de la cabeza"
+
+#. module: acs_hms_paediatric
+#: model:ir.actions.act_window,name:acs_hms_paediatric.action_acs_hms_head_circum_chart_data
+msgid "Head Circumference Growth Data"
+msgstr "Datos de crecimiento de circunferencia de la cabeza"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_appointment__height
+#: model:ir.model.fields.selection,name:acs_hms_paediatric.selection__acs_growth_chart_data__record_type__height
+msgid "Height"
+msgstr "Altura"
+
+#. module: acs_hms_paediatric
+#: model:ir.ui.menu,name:acs_hms_paediatric.menu_acs_hms_height_chart_data
+msgid "Height Growth"
+msgstr "Crecimiento en altura"
+
+#. module: acs_hms_paediatric
+#: model:ir.actions.act_window,name:acs_hms_paediatric.action_acs_hms_height_chart_data
+msgid "Height Growth Data"
+msgstr "Datos de crecimiento en altura"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,help:acs_hms_paediatric.field_hms_appointment__height
+#: model:ir.model.fields,help:acs_hms_paediatric.field_hms_patient__birth_height
+msgid "Height of Child"
+msgstr "Altura del Niño"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hr_department__department_type
+msgid "Hospital Department"
+msgstr "Departamento del Hospital"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__id
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_appointment__id
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__id
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hr_department__id
+msgid "ID"
+msgstr "ID (identificación)"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_appointment__is_child
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__is_child
+msgid "Is Child"
+msgstr "Es un niño"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data____last_update
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_appointment____last_update
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient____last_update
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hr_department____last_update
+msgid "Last Modified on"
+msgstr "Última modificación el"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__write_uid
+msgid "Last Updated by"
+msgstr "Última actualización por"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__write_date
+msgid "Last Updated on"
+msgstr "Última actualización el"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__female_value
+msgid "Normal Female Value"
+msgstr "Valor femenino normal"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__male_value
+msgid "Normal Male Value"
+msgstr "Valor masculino normal"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields.selection,name:acs_hms_paediatric.selection__hr_department__department_type__paediatric
+#: model:ir.ui.menu,name:acs_hms_paediatric.menu_acs_paediatric
+msgid "Paediatric"
+msgstr "Pediatría"
+
+#. module: acs_hms_paediatric
+#: model:res.groups,name:acs_hms_paediatric.group_hms_user_paediatric
+msgid "Paediatric User"
+msgstr "Usuario pediátrico"
+
+#. module: acs_hms_paediatric
+#: model:ir.actions.act_window,name:acs_hms_paediatric.hms_action_child_patient
+#: model:ir.model,name:acs_hms_paediatric.model_hms_patient
+msgid "Patient"
+msgstr "Paciente"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__patient_head_circum_graph
+msgid "Patient Head Circum Graph"
+msgstr "Circunferencia de la cabeza del paciente"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__patient_height_growth
+msgid "Patient Height Growth"
+msgstr "Altura de crecimiento del paciente"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__patient_weight_growth
+msgid "Patient Weight Growth"
+msgstr "Peso de crecimiento del paciente"
+
+#. module: acs_hms_paediatric
+#: model:ir.ui.menu,name:acs_hms_paediatric.menu_acs_patient
+msgid "Patients"
+msgstr "Pacientes"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__sequence
+msgid "Sequence"
+msgstr "Secuencia"
+
+#. module: acs_hms_paediatric
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.view_hms_patient_form_pediatric
+msgid "Show Growth Chart"
+msgstr "Mostrar gráfico de crecimiento"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__record_type
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.view_acs_growth_chart_data_search
+msgid "Type"
+msgstr "Tipo"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields.selection,name:acs_hms_paediatric.selection__acs_growth_chart_data__record_type__weight
+msgid "Weight"
+msgstr "Peso"
+
+#. module: acs_hms_paediatric
+#: model:ir.ui.menu,name:acs_hms_paediatric.menu_acs_hms_weight_chart_data
+msgid "Weight Growth"
+msgstr "Peso de crecimiento"
+
+#. module: acs_hms_paediatric
+#: model:ir.actions.act_window,name:acs_hms_paediatric.action_acs_hms_weight_chart_data
+msgid "Weight Growth Data"
+msgstr "Datos del peso de crecimiento"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,help:acs_hms_paediatric.field_hms_patient__birth_weight
+msgid "Weight of Child"
+msgstr "Peso del niño"
+
+```
+
+  File: i18n/es_PA.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_paediatric
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 14.0-20210330\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-04-09 16:58+0000\n"
+"PO-Revision-Date: 2021-04-09 12:01-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 2.4.2\n"
+"Last-Translator: \n"
+"Language: es_PA\n"
+
+#. module: acs_hms_paediatric
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.user_growth_chart_kanban_view
+msgid ""
+"<i class=\"fa fa-area-chart\" aria-label=\"Info\" title=\"Height Chart\"/> "
+"Head Circumference"
+msgstr ""
+"<i class=\"fa fa-area-chart\" aria-label=\"Info\" title=\"Height Chart\"></"
+"i>Circunferencia de la cabeza"
+
+#. module: acs_hms_paediatric
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.user_growth_chart_kanban_view
+msgid ""
+"<i class=\"fa fa-area-chart\" aria-label=\"Info\" title=\"Height Chart\"/> "
+"Height Chart"
+msgstr ""
+"<i class=\"fa fa-area-chart\" aria-label=\"Info\" title=\"Height Chart\"></"
+"i>Gráfico de altura"
+
+#. module: acs_hms_paediatric
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.user_growth_chart_kanban_view
+msgid ""
+"<i class=\"fa fa-area-chart\" aria-label=\"Info\" title=\"Weight Chart\"/> "
+"Weight Chart"
+msgstr ""
+"<i class=\"fa fa-area-chart\" aria-label=\"Info\" title=\"Weight Chart\"></"
+"i>Tabla de peso"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__age
+msgid "Age"
+msgstr "Edad"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_appointment__age_month
+msgid "Age(Months)"
+msgstr "Edad (Meses)"
+
+#. module: acs_hms_paediatric
+#: model:ir.model,name:acs_hms_paediatric.model_hms_appointment
+msgid "Appointment"
+msgstr "Cita"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__birth_head_circum
+msgid "Birth Head Circumference"
+msgstr "Circunferencia de la cabeza al nacer"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__birth_height
+msgid "Birth Height"
+msgstr "Altura al nacer"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__birth_weight
+msgid "Birth Weight"
+msgstr "Peso al nacer"
+
+#. module: acs_hms_paediatric
+#: model:ir.model,name:acs_hms_paediatric.model_acs_growth_chart_data
+msgid "Chart Data"
+msgstr "Datos del gráfico"
+
+#. module: acs_hms_paediatric
+#: model:ir.ui.menu,name:acs_hms_paediatric.menu_acs_paediatric_configuration
+msgid "Configuration"
+msgstr "Configuración"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__create_uid
+msgid "Created by"
+msgstr "Creado por"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__create_date
+msgid "Created on"
+msgstr "Creada el"
+
+#. module: acs_hms_paediatric
+#: model:ir.model,name:acs_hms_paediatric.model_hr_department
+msgid "Department"
+msgstr "Departamento"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__display_name
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_appointment__display_name
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__display_name
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hr_department__display_name
+msgid "Display Name"
+msgstr "Nombre mostrado"
+
+#. module: acs_hms_paediatric
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.view_acs_growth_chart_data_search
+msgid "Group By..."
+msgstr "Agrupar por..."
+
+#. module: acs_hms_paediatric
+#: model:ir.actions.act_window,name:acs_hms_paediatric.action_growth_chart
+msgid "Growth Chart"
+msgstr "Gráfico de crecimiento"
+
+#. module: acs_hms_paediatric
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.view_acs_acs_growth_chart_data_form
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.view_acs_growth_chart_data_search
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.view_acs_growth_chart_data_tree
+msgid "Growth Chart Data"
+msgstr "Datos del gráfico de crecimiento"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_appointment__head_circum
+#: model:ir.model.fields.selection,name:acs_hms_paediatric.selection__acs_growth_chart_data__record_type__head_circum
+msgid "Head Circumference"
+msgstr "Circunferencia de la cabeza"
+
+#. module: acs_hms_paediatric
+#: model:ir.ui.menu,name:acs_hms_paediatric.menu_acs_hms_head_circum_chart_data
+msgid "Head Circumference Growth"
+msgstr "Crecimiento de la circunferencia de la cabeza"
+
+#. module: acs_hms_paediatric
+#: model:ir.actions.act_window,name:acs_hms_paediatric.action_acs_hms_head_circum_chart_data
+msgid "Head Circumference Growth Data"
+msgstr "Datos de crecimiento de circunferencia de la cabeza"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_appointment__height
+#: model:ir.model.fields.selection,name:acs_hms_paediatric.selection__acs_growth_chart_data__record_type__height
+msgid "Height"
+msgstr "Altura"
+
+#. module: acs_hms_paediatric
+#: model:ir.ui.menu,name:acs_hms_paediatric.menu_acs_hms_height_chart_data
+msgid "Height Growth"
+msgstr "Crecimiento en altura"
+
+#. module: acs_hms_paediatric
+#: model:ir.actions.act_window,name:acs_hms_paediatric.action_acs_hms_height_chart_data
+msgid "Height Growth Data"
+msgstr "Datos de crecimiento en altura"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,help:acs_hms_paediatric.field_hms_appointment__height
+#: model:ir.model.fields,help:acs_hms_paediatric.field_hms_patient__birth_height
+msgid "Height of Child"
+msgstr "Altura del Niño"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hr_department__department_type
+msgid "Hospital Department"
+msgstr "Departamento del Hospital"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__id
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_appointment__id
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__id
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hr_department__id
+msgid "ID"
+msgstr "ID"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_appointment__is_child
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__is_child
+msgid "Is Child"
+msgstr "Es un niño"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data____last_update
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_appointment____last_update
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient____last_update
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hr_department____last_update
+msgid "Last Modified on"
+msgstr "Última modificación el"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__write_uid
+msgid "Last Updated by"
+msgstr "Última actualización por"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__write_date
+msgid "Last Updated on"
+msgstr "Última actualización"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__female_value
+msgid "Normal Female Value"
+msgstr "Valor femenino normal"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__male_value
+msgid "Normal Male Value"
+msgstr "Valor masculino normal"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields.selection,name:acs_hms_paediatric.selection__hr_department__department_type__paediatric
+#: model:ir.ui.menu,name:acs_hms_paediatric.menu_acs_paediatric
+msgid "Paediatric"
+msgstr "Pediatría"
+
+#. module: acs_hms_paediatric
+#: model:res.groups,name:acs_hms_paediatric.group_hms_user_paediatric
+msgid "Paediatric User"
+msgstr "Usuario pediátrico"
+
+#. module: acs_hms_paediatric
+#: model:ir.actions.act_window,name:acs_hms_paediatric.hms_action_child_patient
+#: model:ir.model,name:acs_hms_paediatric.model_hms_patient
+msgid "Patient"
+msgstr "Paciente"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__patient_head_circum_graph
+msgid "Patient Head Circum Graph"
+msgstr "Circunferencia de la cabeza del paciente"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__patient_height_growth
+msgid "Patient Height Growth"
+msgstr "Altura de crecimiento del paciente"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_hms_patient__patient_weight_growth
+msgid "Patient Weight Growth"
+msgstr "Peso de crecimiento del paciente"
+
+#. module: acs_hms_paediatric
+#: model:ir.ui.menu,name:acs_hms_paediatric.menu_acs_patient
+msgid "Patients"
+msgstr "Pacientes"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__sequence
+msgid "Sequence"
+msgstr "Secuencia"
+
+#. module: acs_hms_paediatric
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.view_hms_patient_form_pediatric
+msgid "Show Growth Chart"
+msgstr "Mostrar gráfico de crecimiento"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,field_description:acs_hms_paediatric.field_acs_growth_chart_data__record_type
+#: model_terms:ir.ui.view,arch_db:acs_hms_paediatric.view_acs_growth_chart_data_search
+msgid "Type"
+msgstr "Tipo"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields.selection,name:acs_hms_paediatric.selection__acs_growth_chart_data__record_type__weight
+msgid "Weight"
+msgstr "Peso"
+
+#. module: acs_hms_paediatric
+#: model:ir.ui.menu,name:acs_hms_paediatric.menu_acs_hms_weight_chart_data
+msgid "Weight Growth"
+msgstr "Peso de crecimiento"
+
+#. module: acs_hms_paediatric
+#: model:ir.actions.act_window,name:acs_hms_paediatric.action_acs_hms_weight_chart_data
+msgid "Weight Growth Data"
+msgstr "Datos del peso de crecimiento"
+
+#. module: acs_hms_paediatric
+#: model:ir.model.fields,help:acs_hms_paediatric.field_hms_patient__birth_weight
+msgid "Weight of Child"
+msgstr "Peso del niño"
+
+```
+
+Static:
+  File: static/description/index.html
+  Content:
+```
+<head>
+  <style>
+      .backgrounds{background-color:#fff; color:#0B80E6}
+  </style>
+</head>
+
+<section class="oe_container">
+    <div class="mt32 mb32">
+        <div style="background-color: #2d9f9d; background-image: linear-gradient(#918c8c, #2d9f9d); background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%); border-radius: 10px 10px 10px 10px; min-height: 160px;">
+            <div class="text-white font-weight-bold" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                <div class="pt-2 text-center">
+                    <span>
+                    <span class="pt-2 text-center" style="font-size:27px;">Almighty Consulting Solutions Pvt. Ltd.</span><br/>
+                </div>
+                <div class="row mt16">
+                    <div class="col-4 text-center">
+                        <span>Supported Editions</span><br/> 
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Community 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Enterprise 
+                        </span>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <a href="https://www.almightycs.com" target="_blank">
+                            <img src="almightycs.png" width="80" height="auto">
+                        </a>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <span>Supported Hostings <br/></span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Odoo.sh 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Cloud
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>On Premise 
+                        </span><br/>
+                        <span class="pt-2 text-center" style="font-size:12px;">App can not be used on odoo online.</span><br/>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+ 
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12 oe_mt32 mb32">
+            <h3 class="oe_slogan">Hospital Management System for Paediatrics (Pediatric)</h3><h4><br/></h4>
+        </div>
+    </div> 
+</section>
+
+<section class="oe_container">
+    <div class='text-center mt92'>
+        <h2> Detailed Description of Module</h2>
+    </div>
+    <div class="panel-body">
+        <div class="alert alert-info">
+            <h3>
+                <a data-toggle="collapse" href="#acs_lab"><i class="fa fa-plus-circle"></i></a>
+                <b> Hospital Management System for Paediatrics</b>
+                <b style="float:right"><a href="http://www.almightycs.com" target="_blank">By ACS </b></a>
+            </h3>
+ 
+            <h4><i class="fa fa-hand-o-right text-success"></i> All Basic Hospital Management functionality from Base Module <a href="https://apps.odoo.com/apps/modules/15.0/acs_hms/"> Check it Here</a>.</h4>
+            <h4><i class="fa fa-hand-o-right text-success"></i> Manage child specific details on Patients &amp; Appointments.</h4>
+            <h4><i class="fa fa-hand-o-right text-success"></i> Configure Growth Related Charts. </h4>
+            <h4><i class="fa fa-hand-o-right text-success"></i> Compare Child Growth with configured charts. </h4>
+        </div>
+        <div id="acs_gynec" class="panel-collapse collapse in" class="oe_span12">
+            
+        </div>
+        <br/>
+        <br/>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        
+    </div>
+    <div class="oe_row oe_spaced">
+        <div class="oe_demo o_picture o_screenshot">
+            <a href="http://www.almightycs.com/blog/blogs-1" target="_blank">
+                <img src="acs_almightycs_weight_chart_odoo.png">
+            </a>
+            <div class="oe_demo_footer oe_centeralign">Weight Growth Charts.</div><br/>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        
+    </div>
+    <div class="oe_row oe_spaced">
+        <div class="oe_demo o_picture o_screenshot">
+            <a href="http://www.almightycs.com/blog/blogs-1" target="_blank">
+                <img src="acs_almightycs_height_chart_odoo.png">
+            </a>
+            <div class="oe_demo_footer oe_centeralign">Height Growth Charts.</div><br/>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        
+    </div>
+    <div class="oe_row oe_spaced">
+        <div class="oe_demo o_picture o_screenshot">
+            <a href="http://www.almightycs.com/blog/blogs-1" target="_blank">
+                <img src="acs_almightycs_head_chart_odoo.png">
+            </a>
+            <div class="oe_demo_footer oe_centeralign">Head Circumference Charts.</div><br/>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <h4 class="oe_slogan"><a href="http://www.almightycs.com">Almighty Consulting Solutions Pvt. Ltd.</a> </h4>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12">
+            <h3 class="oe_slogan">Other Configuration</h3>
+            <p class="oe_slogan">To use this module no technical knowledge is required. Just install module and functionality is ready to use. For more customization and help contact us.</p>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span6">
+            <div class="oe_demo o_picture o_screenshot">
+                <a href="https://www.almightycs.com" target="_blank">
+                    <img src="acs.png" width="200" height="auto">
+                </a>
+                <div class="oe_demo_footer oe_centeralign">Meet Us</div>
+            </div>
+        </div>
+        <div class="oe_span6">
+            <br/><br/>
+            <h2 class="oe_slogan">Do you need help?</h2>
+            <h3 class="oe_slogan">
+                Let's offer you the best services!
+            </h3>
+            <p class="oe_mt32 text-center">
+                Contact us by our official channels.
+            </p>
+            <p class="oe_mt32 text-center">
+                Skype: turkesh4friends 
+            </p>
+            <div class="oe_spaced">
+                <ul class="text-center list-inline">
+                    <li>
+                        <a href="https://www.linkedin.com/organization-guest/company/almighty-consulting-services" Target="_blank"><i class="fa fa-linkedin-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://www.facebook.com/AlmightyCS.ERP" Target="_blank"><i class="fa fa-facebook-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://github.com/tpa-odoo" Target="_blank"><i class="fa fa-github-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="mailto:info@almightycs.com" Target="_blank"><i class="fa fa-envelope-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://twitter.com/_AlmightyCS" Target="_blank" ><i class="fa fa-twitter-square fa-xs backgrounds"></i></a>
+                    </li>
+
+                    <li>
+                        <a title="Contact us" data-toggle="tooltip" data-placement="left" Target="_blank" href="https://www.almightycs.com/contactus"><i class="fa fa-globe fa-xs backgrounds"></i></a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+<section class="oe_container">
+
+    <div data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: fixed;
+            bottom: 10px;
+            right: 20px;
+            z-index: 1000;
+            box-shadow: 1px 2px 11px rgba(0, 0, 0, 0.3), -5px 7px 12px rgba(0, 0, 0, 0.22);
+            cursor: pointer;">
+        <span class="fa fa-2x fa-handshake-o"></span>
+    </div>
+    
+    <div class="collapse show" id="contactus-floating" style="z-index: 1006; position: fixed; bottom: 10px; right: 20px;">
+        <div style="width:246px; overflow: hidden;">
+            <div class="text-center acs-contactus-close" data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+                    width: 25px;
+                    height: 25px;
+                    margin-bottom: -25px;
+                    display: flex;
+                    color: white;
+                    align-items: center;
+                    justify-content: center;
+                    position: relative;
+                    z-index: 1000;
+                    cursor: pointer;">
+                <i class="fa fa-times"></i>
+            </div>
+            <div class="acs-contactus-data" style="
+                    margin-top: -17px;
+                    background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+                    border-radius: 10px 10px 10px 10px;
+                    padding-bottom: 10px;
+                    height: 106px;">
+                <div class="text-center" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                    <span class="pt-2 text-white font-weight-bold" style="">Contact AlmightyCS</span>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; font-size: 14px;">  
+                    <a href="skype:turkesh4friends" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-skype" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Skype</span>
+                    </a>
+                    <a href="https://www.almightycs.com" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-globe fa-spin" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Website</span>
+                    </a>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; 
+                    font-size: 14px; 
+                    padding-bottom: 20px; 
+                    padding-top: 22px;"> 
+                    <a href="mailto:info@almightycs.com" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-envelope" style="font-size: 19px;"></i>
+                        <span class="pt-2 font-weight-bold">Email</span>
+                    </a>
+                    <a href="https://www.almightycs.com/contactus" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-handshake-o" style="font-size: 20px;"></i>
+                        <span class="pt-2 font-weight-bold">Contactus</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div> 
+
+</section>
+```
+
+Doc:
+  File: doc/changelog.rst
+  Content:
+```
+`1.0.1                                                        [13/10/2023]`
+***************************************************************************
+- Migrate Module for v17
+```
+

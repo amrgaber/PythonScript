@@ -1,0 +1,550 @@
+Addon: acs_hms_insurance_radiology
+
+Manifest: __manifest__.py
+Content:
+```python
+# -*- coding: utf-8 -*-
+#╔══════════════════════════════════════════════════════════════════════╗
+#║                                                                      ║
+#║                  ╔═══╦╗       ╔╗  ╔╗     ╔═══╦═══╗                   ║
+#║                  ║╔═╗║║       ║║ ╔╝╚╗    ║╔═╗║╔═╗║                   ║
+#║                  ║║ ║║║╔╗╔╦╦══╣╚═╬╗╔╬╗ ╔╗║║ ╚╣╚══╗                   ║
+#║                  ║╚═╝║║║╚╝╠╣╔╗║╔╗║║║║║ ║║║║ ╔╬══╗║                   ║
+#║                  ║╔═╗║╚╣║║║║╚╝║║║║║╚╣╚═╝║║╚═╝║╚═╝║                   ║
+#║                  ╚╝ ╚╩═╩╩╩╩╩═╗╠╝╚╝╚═╩═╗╔╝╚═══╩═══╝                   ║
+#║                            ╔═╝║     ╔═╝║                             ║
+#║                            ╚══╝     ╚══╝                             ║
+#║                  SOFTWARE DEVELOPED AND SUPPORTED BY                 ║
+#║                ALMIGHTY CONSULTING SOLUTIONS PVT. LTD.               ║
+#║                      COPYRIGHT (C) 2016 - TODAY                      ║
+#║                      https://www.almightycs.com                      ║
+#║                                                                      ║
+#╚══════════════════════════════════════════════════════════════════════╝
+{
+    'name': 'Radiology Insurance Management System',
+    'summary': 'Patient Insurance Management for Radiology and related Claims',
+    'description': """
+        Patient Insurance Management for Radiology and related Claims. Hospital Management with Insurance Claim. ACS HMS
+    """,
+    'category': 'Medical',
+    'version': '1.0.3',
+    'author': 'Almighty Consulting Solutions Pvt. Ltd.',
+    'website': 'https://www.almightycs.com',
+    'license': 'OPL-1',
+    'depends': ['acs_hms_radiology', 'acs_hms_insurance'],
+    'data': [
+        'security/ir.model.access.csv',
+        'views/hms_base_view.xml',
+        'views/insurance_view.xml',
+    ],
+    'images': [
+        'static/description/hms_insuranceacs_almightycs_odoo_cover.jpg',
+    ],
+    'installable': True,
+    'application': True,
+    'sequence': 3,
+    'price': 11,
+    'currency': 'USD',
+}
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+__init__.py:
+Content:
+```python
+# -*- coding: utf-8 -*-
+
+from . import models
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+Models:
+  File: models/__init__.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from . import insurance
+from . import hms_base
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: models/hms_base.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+from odoo import api, fields, models, _
+
+
+class AcsRadiologyRequest(models.Model):
+    _inherit = 'acs.radiology.request'
+
+    insurance_id = fields.Many2one('hms.patient.insurance', string='Insurance Policy')
+    claim_id = fields.Many2one('hms.insurance.claim', string='Claim')
+    insurance_company_id = fields.Many2one('hms.insurance.company', related='insurance_id.insurance_company_id', string='Insurance Company', readonly=True, store=True)
+    radiology_insurance_percentage = fields.Float(related='insurance_id.radiology_insurance_percentage', string="Insured Percentage", readonly=True)
+
+    @api.onchange('patient_id')
+    def onchange_patient_id(self):
+        allow_radiology_insurances = self.patient_id.insurance_ids.filtered(lambda x: x.allow_radiology_insurance)
+        if self.patient_id and allow_radiology_insurances:
+            insurance = allow_radiology_insurances[0]
+            self.insurance_id = insurance.id
+            self.pricelist_id = insurance.pricelist_id and insurance.pricelist_id.id or False
+
+    def create_invoice(self):
+        res = super(AcsRadiologyRequest, self).create_invoice()
+        if self.invoice_id and self.insurance_id and (self.insurance_id.radiology_insurance_limit >= self.invoice_id.amount_total or self.insurance_id.radiology_insurance_limit==0):
+            insurace_invoice = self.invoice_id.acs_create_insurace_invoice(self.insurance_id, self.insurance_id.radiology_insurance_type, 
+                self.insurance_id.radiology_insurance_amount, self.insurance_id.radiology_insurance_percentage, 
+                self, 'radiology', 'radiology_request_id', self.insurance_id.radiology_create_claim)
+            if insurace_invoice and insurace_invoice.claim_id:
+                self.claim_id = insurace_invoice.claim_id.id
+        return res 
+```
+
+  File: models/insurance.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from odoo import api, fields, models, _
+
+
+class InsuranceClaim(models.Model):
+    _inherit = 'hms.insurance.claim'
+
+    radiology_request_id = fields.Many2one('acs.radiology.request', string='Radiology Request')
+    claim_for = fields.Selection(selection_add=[('radiology', 'Radiology')])
+
+
+class InsurancePlan(models.Model):
+    _inherit = 'acs.insurance.plan'
+
+    allow_radiology_insurance = fields.Boolean(string="Insured Radiology", default=False)
+    radiology_insurance_type = fields.Selection([
+        ('percentage', 'Percentage'),
+        ('fix', 'Fix-amount')], 'Radiology Insurance Type', default='percentage', required=True)
+    radiology_insurance_amount = fields.Float(string="Radiology Co-payment", help="The patient should pay specific amount 50QR")
+    radiology_insurance_percentage = fields.Float(string="Radiology Insured Percentage")
+    radiology_insurance_limit = fields.Float(string="Radiology Insurance Limit")
+    radiology_create_claim = fields.Boolean(string="Radiology Create Claim", default=False)
+
+
+class Insurance(models.Model):
+    _inherit = 'hms.patient.insurance'
+
+    allow_radiology_insurance = fields.Boolean(string="Insured Radiology", default=False)
+    radiology_insurance_type = fields.Selection([
+        ('percentage', 'Percentage'),
+        ('fix', 'Fix-amount')], 'Radiology Insurance Type', default='percentage', required=True)
+    radiology_insurance_amount = fields.Float(string="Radiology Co-payment", help="The patient should pay specific amount 50QR")
+    radiology_insurance_percentage = fields.Float(string="Radiology Insured Percentage")
+    radiology_insurance_limit = fields.Float(string="Radiology Insurance Limit")
+    radiology_create_claim = fields.Boolean(string="Radiology Create Claim", default=False)
+
+    @api.onchange('insurance_plan_id')
+    def onchange_insurance_plan(self):
+        super().onchange_insurance_plan()
+        if self.insurance_plan_id:
+            plan_id = self.insurance_plan_id
+            self.allow_radiology_insurance = plan_id.allow_radiology_insurance
+            self.radiology_insurance_type = plan_id.radiology_insurance_type
+            self.radiology_insurance_amount = plan_id.radiology_insurance_amount
+            self.radiology_insurance_percentage = plan_id.radiology_insurance_percentage
+            self.radiology_insurance_limit = plan_id.radiology_insurance_limit
+            self.radiology_create_claim = plan_id.radiology_create_claim
+```
+
+Views:
+  File: views/hms_base_view.xml
+  Content:
+```
+<?xml version="1.0"?>
+<odoo>
+
+    <!-- <Laboratory> -->
+    <record id="patient_radiology_test_request_form" model="ir.ui.view">
+        <field name="name">acs.radiology.request.from</field>
+        <field name="model">acs.radiology.request</field>
+        <field name="inherit_id" ref="acs_radiology.patient_radiology_test_request_form"/>
+        <field name="arch" type="xml">
+            <field name="company_id" position="after">
+                <field name="insurance_id" domain="[('patient_id','=', patient_id), ('allow_radiology_insurance', '=', True)]"/>
+                <field name="insurance_company_id"/>
+                <field name="claim_id"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="patient_radiology_test_request_tree" model="ir.ui.view">
+        <field name="name">acs.radiology.request.tree</field>
+        <field name="model">acs.radiology.request</field>
+        <field name="inherit_id" ref="acs_radiology.patient_radiology_test_request_tree"/>
+        <field name="arch" type="xml">
+            <field name='physician_id' position="after">
+                <field name="insurance_id" optional="hide"/>
+                <field name="insurance_company_id" optional="hide"/>
+                <field name="claim_id" optional="hide"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="view_acs_radiology_request_search" model="ir.ui.view">
+        <field name="name">acs.radiology.request.search</field>
+        <field name="model">acs.radiology.request</field>
+        <field name="inherit_id" ref="acs_radiology.view_acs_radiology_request_search"/>
+        <field name="arch" type="xml">
+            <search>
+                <filter name="is_insured" string="Insured" domain="[('insurance_id','!=',False)]"/>
+                <field name="insurance_id"/>
+                <group expand="0" string="Group By...">
+                    <filter string="Insurance Company" name="insurance_company_groupby" domain="[]" context="{'group_by':'insurance_company_id'}"/>
+                    <filter string="Insurance Policy" name="insurance_policy_groupby" domain="[]" context="{'group_by':'insurance_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+    
+</odoo>
+```
+
+  File: views/insurance_view.xml
+  Content:
+```
+<?xml version="1.0"?>
+<odoo>
+
+    <record id="view_acs_insurance_plan_form" model="ir.ui.view">
+        <field name="name">acs.insurance.plan.form</field>
+        <field name="model">acs.insurance.plan</field>
+        <field name="inherit_id" ref="acs_hms_insurance.view_acs_insurance_plan_form"/>
+        <field name="arch" type="xml">
+            <group name="pharmacy_insurance" position="after">
+                <group name="radiology_insurance">
+                    <separator string="Radiology"/>
+                    <field name="allow_radiology_insurance"/>
+                    <field name="radiology_insurance_type" invisible="not allow_radiology_insurance"/>
+                    <field name="radiology_insurance_percentage" invisible="not allow_radiology_insurance or radiology_insurance_type=='fix'"/>
+                    <field name="radiology_insurance_amount" invisible="not allow_radiology_insurance or radiology_insurance_type=='percentage'"/>
+                    <field name="radiology_insurance_limit" invisible="not allow_radiology_insurance"/>
+                    <field name="radiology_create_claim" invisible="not allow_radiology_insurance"/>
+                </group>
+            </group>
+        </field>
+    </record>
+
+    <record id="view_hms_patient_insurance_form" model="ir.ui.view">
+        <field name="name">hms.patient.insurance.form</field>
+        <field name="model">hms.patient.insurance</field>
+        <field name="inherit_id" ref="acs_hms_insurance.view_hms_patient_insurance_form"/>
+        <field name="arch" type="xml">
+            <group name="pharmacy_insurance" position="after">
+                <group name="radiology_insurance">
+                    <separator string="Radiology"/>
+                    <field name="allow_radiology_insurance"/>
+                    <field name="radiology_insurance_type" invisible="not allow_radiology_insurance"/>
+                    <field name="radiology_insurance_percentage" invisible="not allow_radiology_insurance or radiology_insurance_type=='fix'"/>
+                    <field name="radiology_insurance_amount" invisible="not allow_radiology_insurance or radiology_insurance_type=='percentage'"/>
+                    <field name="radiology_insurance_limit" invisible="not allow_radiology_insurance"/>
+                    <field name="radiology_create_claim" invisible="not allow_radiology_insurance"/>
+                </group>
+            </group>
+        </field>
+    </record>
+
+    <!-- Claim View -->
+    <record id="view_claim_tree" model="ir.ui.view">
+        <field name="name">insurance.claim.tree</field>
+        <field name="model">hms.insurance.claim</field>
+        <field name="inherit_id" ref="acs_hms_insurance.view_claim_tree"/>
+        <field name="arch" type="xml">
+            <field name="appointment_id" position="before">
+                <field name="radiology_request_id"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="view_insurance_claim_form" model="ir.ui.view">
+        <field name="name">hms.insurance.claim.form</field>
+        <field name="model">hms.insurance.claim</field>
+        <field name="inherit_id" ref="acs_hms_insurance.view_insurance_claim_form"/>
+        <field name="arch" type="xml">
+            <field name="claim_for" position="after">
+                <field name="radiology_request_id" domain="[('patient_id', '=', patient_id)]" options="{'no_create': True}" invisible="claim_for!='radiology'" required="claim_for!='radiology'" readonly="state in ('cancel','done')"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="view_acs_insurance_claim_calendar" model="ir.ui.view">
+        <field name="name">hms.insurance.claim.calendar</field>
+        <field name="model">hms.insurance.claim</field>
+        <field name="inherit_id" ref="acs_hms_insurance.view_acs_insurance_claim_calendar"/>
+        <field name="type">calendar</field>
+        <field name="arch" type="xml">
+            <field name="appointment_id" position="before">
+                <field name="radiology_request_id"/>
+            </field>
+        </field>
+    </record>
+
+</odoo>
+```
+
+Static:
+  File: static/description/index.html
+  Content:
+```
+<head>
+  <style>
+      .backgrounds{background-color:#fff; color:#0B80E6}
+  </style>
+</head>
+
+<section class="oe_container">
+    <div class="mt32 mb32">
+        <div style="background-color: #2d9f9d; background-image: linear-gradient(#918c8c, #2d9f9d); background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%); border-radius: 10px 10px 10px 10px; min-height: 160px;">
+            <div class="text-white font-weight-bold" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                <div class="pt-2 text-center">
+                    <span>
+                    <span class="pt-2 text-center" style="font-size:27px;">Almighty Consulting Solutions Pvt. Ltd.</span><br/>
+                </div>
+                <div class="row mt16">
+                    <div class="col-4 text-center">
+                        <span>Supported Editions</span><br/> 
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Community 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Enterprise 
+                        </span>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <a href="https://www.almightycs.com" target="_blank">
+                            <img src="almightycs.png" width="80" height="auto">
+                        </a>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <span>Supported Hostings <br/></span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Odoo.sh 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Cloud
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>On Premise 
+                        </span><br/>
+                        <span class="pt-2 text-center" style="font-size:12px;">App can not be used on odoo online.</span><br/>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+ 
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12 oe_mt32 mb32">
+            <h3 class="oe_slogan">Radiology Insurance Claim Management System</h3><h4><br/>This Module Adds Radiology Insurance Claim related features for inpatient.</h4>
+        </div>
+    </div> 
+</section>
+
+<section class="oe_container mt32 mb32">
+    <div class="oe_row oe_spaced">
+        <div class='oe_span12 mt92 alert alert-success'>
+            <h3 class="text-center"> 
+                <i class="fa fa-star fa-spin fa-2x fa-fw"></i>
+                What is special from other HMS applications 
+                <i class="fa fa-star fa-spin fa-2x fa-fw"></i>
+            </h3>
+            <hr/>
+            <h2><i class="fa fa-hand-o-right text-success"></i> Clean Code</h2>
+            <h2><i class="fa fa-hand-o-right text-success"></i> Proper User Roles</h2>
+            <h2><i class="fa fa-hand-o-right text-success"></i> Record Rules and Access rights</h2>
+            <h2><i class="fa fa-hand-o-right text-success"></i> Clean Form Views</h2>
+            <h2><i class="fa fa-hand-o-right text-success"></i> Many more supporting modules to complete flow</h2>
+        </div>
+    </div>
+</section>
+
+
+<section class="oe_mt32">
+    <div class='text-center mt92'>
+        <h2> Detailed Description of Module</h2>
+    </div>
+    <div class="panel-body">
+        <div class="alert alert-info">
+            <a data-toggle="collapse" href="#acs_insurance"><i class="fa fa-plus-circle"></i></a>
+            <b> Radiology Insurance Management</b>
+            <b style="float:right"><a href="http://www.almightycs.com" target="_blank">By ACS </b>
+        </div>
+        <div id="acs_insurance" class="panel-collapse out collapse show" class="oe_span12">
+            <h3><i class="fa fa-hand-o-right text-success"></i> All Insurance functionality from Insurance Module <a href="https://apps.odoo.com/apps/modules/16.0/acs_hms_insurance/"> Check it Here</a>.</h3>
+            <h3><i class="fa fa-hand-o-right text-success"></i> Insurance invoice option in Radiology.</h3>
+            <h3><i class="fa fa-hand-o-right text-success"></i> Radiology Insurace configuration on insurance policy.</h3>
+        </div>
+    </div>
+</section>
+
+<section>
+    <div class="oe_row oe_spaced">
+        <h4 class="oe_slogan"><a href="http://www.almightycs.com">Almighty Consulting Solutions Pvt. Ltd.</a> </h4>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12">
+            <h3 class="oe_slogan">Other Configuration</h3>
+            <p class="oe_slogan">To use this module no technical knowledge is required. Just install module and functionality is ready to use. For more customization and help contact us.</p>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span6">
+            <div class="oe_demo o_picture o_screenshot">
+                <a href="https://www.almightycs.com" target="_blank">
+                    <img src="acs.png" width="200" height="auto">
+                </a>
+                <div class="oe_demo_footer oe_centeralign">Meet Us</div>
+            </div>
+        </div>
+        <div class="oe_span6">
+            <br/><br/>
+            <h2 class="oe_slogan">Do you need help?</h2>
+            <h3 class="oe_slogan">
+                Let's offer you the best services!
+            </h3>
+            <p class="oe_mt32 text-center">
+                Contact us by our official channels.
+            </p>
+            <p class="oe_mt32 text-center">
+                Skype: turkesh4friends 
+            </p>
+            <div class="oe_spaced">
+                <ul class="text-center list-inline">
+                    <li>
+                        <a href="https://www.linkedin.com/organization-guest/company/almighty-consulting-services" Target="_blank"><i class="fa fa-linkedin-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://www.facebook.com/AlmightyCS.ERP" Target="_blank"><i class="fa fa-facebook-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://github.com/tpa-odoo" Target="_blank"><i class="fa fa-github-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="mailto:info@almightycs.com" Target="_blank"><i class="fa fa-envelope-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://twitter.com/_AlmightyCS" Target="_blank" ><i class="fa fa-twitter-square fa-xs backgrounds"></i></a>
+                    </li>
+
+                    <li>
+                        <a title="Contact us" data-toggle="tooltip" data-placement="left" Target="_blank" href="https://www.almightycs.com/contactus"><i class="fa fa-globe fa-xs backgrounds"></i></a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+<section class="oe_container">
+
+    <div data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: fixed;
+            bottom: 10px;
+            right: 20px;
+            z-index: 1000;
+            box-shadow: 1px 2px 11px rgba(0, 0, 0, 0.3), -5px 7px 12px rgba(0, 0, 0, 0.22);
+            cursor: pointer;">
+        <span class="fa fa-2x fa-handshake-o"></span>
+    </div>
+    
+    <div class="collapse show" id="contactus-floating" style="z-index: 1006; position: fixed; bottom: 10px; right: 20px;">
+        <div style="width:246px; overflow: hidden;">
+            <div class="text-center acs-contactus-close" data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+                    width: 25px;
+                    height: 25px;
+                    margin-bottom: -25px;
+                    display: flex;
+                    color: white;
+                    align-items: center;
+                    justify-content: center;
+                    position: relative;
+                    z-index: 1000;
+                    cursor: pointer;">
+                <i class="fa fa-times"></i>
+            </div>
+            <div class="acs-contactus-data" style="
+                    margin-top: -17px;
+                    background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+                    border-radius: 10px 10px 10px 10px;
+                    padding-bottom: 10px;
+                    height: 106px;">
+                <div class="text-center" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                    <span class="pt-2 text-white font-weight-bold" style="">Contact AlmightyCS</span>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; font-size: 14px;">  
+                    <a href="skype:turkesh4friends" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-skype" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Skype</span>
+                    </a>
+                    <a href="https://www.almightycs.com" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-globe fa-spin" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Website</span>
+                    </a>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; 
+                    font-size: 14px; 
+                    padding-bottom: 20px; 
+                    padding-top: 22px;"> 
+                    <a href="mailto:info@almightycs.com" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-envelope" style="font-size: 19px;"></i>
+                        <span class="pt-2 font-weight-bold">Email</span>
+                    </a>
+                    <a href="https://www.almightycs.com/contactus" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-handshake-o" style="font-size: 20px;"></i>
+                        <span class="pt-2 font-weight-bold">Contactus</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div> 
+
+</section>
+```
+
+Doc:
+  File: doc/changelog.rst
+  Content:
+```
+`1.0.3                                                        [26/12/2023]`
+***************************************************************************
+- Improved Insurance plan view.
+
+`1.0.2                                                        [25/12/2023]`
+***************************************************************************
+- Improved code for claim view.
+
+`1.0.1                                                        [21/10/2023]`
+***************************************************************************
+- Migrated Module for v17
+```
+

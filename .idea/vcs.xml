@@ -10,4 +10,13 @@
       </list>
     </option>
   </component>
+  <component name="VcsDirectoryMappings">
+    <mapping directory="$PROJECT_DIR$" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/OdooModuleScanner" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/RepoToTextForLLMs" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/exemples_report" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/omdbapi" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/propertyfinder_crawler" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/pythonProject2/odooxp2021-fastapi" vcs="Git" />
+  </component>
 </project>

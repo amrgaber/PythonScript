@@ -1,0 +1,1577 @@
+Addon: acs_hms_barcode
+
+Manifest: __manifest__.py
+Content:
+```python
+# -*- coding: utf-8 -*-
+#╔══════════════════════════════════════════════════════════════════════╗
+#║                                                                      ║
+#║                  ╔═══╦╗       ╔╗  ╔╗     ╔═══╦═══╗                   ║
+#║                  ║╔═╗║║       ║║ ╔╝╚╗    ║╔═╗║╔═╗║                   ║
+#║                  ║║ ║║║╔╗╔╦╦══╣╚═╬╗╔╬╗ ╔╗║║ ╚╣╚══╗                   ║
+#║                  ║╚═╝║║║╚╝╠╣╔╗║╔╗║║║║║ ║║║║ ╔╬══╗║                   ║
+#║                  ║╔═╗║╚╣║║║║╚╝║║║║║╚╣╚═╝║║╚═╝║╚═╝║                   ║
+#║                  ╚╝ ╚╩═╩╩╩╩╩═╗╠╝╚╝╚═╩═╗╔╝╚═══╩═══╝                   ║
+#║                            ╔═╝║     ╔═╝║                             ║
+#║                            ╚══╝     ╚══╝                             ║
+#║                  SOFTWARE DEVELOPED AND SUPPORTED BY                 ║
+#║                ALMIGHTY CONSULTING SOLUTIONS PVT. LTD.               ║
+#║                      COPYRIGHT (C) 2016 - TODAY                      ║
+#║                      https://www.almightycs.com                      ║
+#║                                                                      ║
+#╚══════════════════════════════════════════════════════════════════════╝
+{
+    "name": "Patient Barcode in Hospital Management", 
+    "description": """Barcode For Patient and Appointment creation
+        This module add barcode on patient.
+        hospital management system ACS HMS
+    """, 
+    'version': '1.0.2',
+    'category': 'Medical',
+    'author': 'Almighty Consulting Solutions Pvt. Ltd.',
+    'website': 'https://www.almightycs.com',
+    'license': 'OPL-1',
+    "depends": ["acs_hms", "barcodes"],
+    "data": [
+        "security/ir.model.access.csv",
+        "data/data.xml",
+        "report/barcode_report_view.xml",
+        "report/paper_format.xml",
+        "views/patient_view.xml",
+        "wizard/patient_barcode_wizard.xml",
+    ],
+    'images': [
+        'static/description/hms_almightycs_cover.jpg',
+    ],
+    'sequence': 2,
+    'price': 35,
+    'currency': 'USD',
+}
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+__init__.py:
+Content:
+```python
+# -*- encoding: utf-8 -*-
+
+from . import model
+from . import wizard
+from . import report
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+Views:
+  File: views/patient_view.xml
+  Content:
+```
+<?xml version='1.0' encoding='UTF-8'?>
+<odoo>
+    <record id="view_patient_barcode_form" model="ir.ui.view">
+        <field name="name">ACS Patient</field>
+        <field name="model">hms.patient</field>
+        <field name="inherit_id" ref="acs_hms.view_patient_form" />
+        <field name="arch" type="xml">
+            <group name="corporate_tieup" position="after">
+                <group name="barcode">
+                    <label for="barcode"/>
+                    <div name='barcode'>
+                        <field name='barcode' class="oe_inline" nolabel="1"/>
+                        <button name="generate_barcode" string="Generate Barcode" class="oe_highlight oe_inline" invisible="barcode" type="object"/>
+                    </div>
+                </group>
+            </group>
+        </field>
+    </record>
+
+    <record id="view_appointment_barcode_form" model="ir.ui.view">
+        <field name="name">ACS Appointment Barcode</field>
+        <field name="model">hms.appointment</field>
+        <field name="inherit_id" ref="acs_hms.view_hms_appointment_form"/>
+        <field name="arch" type="xml">
+            <form position="inside">
+                <field name="_barcode_scanned" widget="barcode_handler"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_hms_prescription_order_form" model="ir.ui.view">
+        <field name="name">ACS Prescription Barcode</field>
+        <field name="model">prescription.order</field>
+        <field name="inherit_id" ref="acs_hms.view_hms_prescription_order_form"/>
+        <field name="arch" type="xml">
+            <form position="inside">
+                <field name="_barcode_scanned" widget="barcode_handler"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_hospital_hms_treatment_form" model="ir.ui.view">
+        <field name="name">ACS Treatment Barcode</field>
+        <field name="model">hms.treatment</field>
+        <field name="inherit_id" ref="acs_hms.view_hospital_hms_treatment_form"/>
+        <field name="arch" type="xml">
+            <form position="inside">
+                <field name="_barcode_scanned" widget="barcode_handler"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_patient_barcode_search" model="ir.ui.view">
+        <field name="name">ACS Patient Barcode</field>
+        <field name="model">hms.patient</field>
+        <field name="inherit_id" ref="acs_hms_base.view_patient_filter"/>
+        <field name="arch" type="xml">
+            <search>
+                <field name="barcode">
+                </field>
+            </search>
+        </field>
+    </record>
+
+</odoo>
+
+```
+
+Data:
+  File: data/data.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+    
+        <!-- Patient Sequences -->
+        <record id="seq_patient_sequence" model="ir.sequence">
+            <field name="name">Patient Barcode</field>
+            <field name="code">patient.barcode</field>
+            <field name="prefix">000000</field>
+            <field name="padding">6</field>
+            <field name="number_next">1</field>
+            <field name="acs_auto_create" eval="True"/>
+            <field name="company_id" eval="False"/>
+        </record>
+
+    </data>
+</odoo>
+
+```
+
+I18n:
+  File: i18n/ar.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_barcode
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 13.0+e\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2019-11-02 09:58+0000\n"
+"PO-Revision-Date: 2019-11-02 09:58+0000\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: \n"
+"Plural-Forms: \n"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_appointment__get_patient_barcode
+msgid "Add Patient"
+msgstr "إضافة المريض"
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_hms_appointment
+msgid "Appointment"
+msgstr ""
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_patient__barcode
+msgid "Barcode"
+msgstr "باركود"
+
+#. module: acs_hms_barcode
+#: model:ir.model.constraint,message:acs_hms_barcode.constraint_hms_patient_ean13_uniq
+msgid "Barcode must be unique!"
+msgstr ""
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Barcode patient Level"
+msgstr "الباركود مستوى المريض"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Cancel"
+msgstr "إلغاء"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__columns
+msgid "Columns"
+msgstr "الأعمدة"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__create_uid
+msgid "Created by"
+msgstr "أنشئ بواسطة"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__create_date
+msgid "Created on"
+msgstr "أنشئ في"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__display_name
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_report_acs_hms_barcode_report_patient_barcode__display_name
+msgid "Display Name"
+msgstr "الاسم المعروض"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_patient_barcode_form
+msgid "Generate Barcode"
+msgstr "إصدار باركود"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__id
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_report_acs_hms_barcode_report_patient_barcode__id
+msgid "ID"
+msgstr "المُعرف"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard____last_update
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_report_acs_hms_barcode_report_patient_barcode____last_update
+msgid "Last Modified on"
+msgstr "آخر تعديل في"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__write_uid
+msgid "Last Updated by"
+msgstr "آخر تحديث بواسطة"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__write_date
+msgid "Last Updated on"
+msgstr "آخر تحديث في"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,help:acs_hms_barcode.field_hms_patient__barcode
+msgid "Number used for Patient identification."
+msgstr "الرقم المستخدم للتعرف على المريض."
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_hms_patient
+msgid "Patient"
+msgstr "المريض"
+
+#. module: acs_hms_barcode
+#: model:ir.actions.report,name:acs_hms_barcode.action_patient_barcode
+msgid "Patient BarCode"
+msgstr "باركود المريض"
+
+#. module: acs_hms_barcode
+#: model:ir.actions.report,name:acs_hms_barcode.action_patient_barcode_lable
+msgid "Patient BarCode LP"
+msgstr ""
+
+#. module: acs_hms_barcode
+#: model:ir.actions.act_window,name:acs_hms_barcode.action_patient_barcode_wiz
+#: model:ir.model,name:acs_hms_barcode.model_report_acs_hms_barcode_report_patient_barcode
+msgid "Patient Barcode"
+msgstr "باركود المريض"
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_patient_barcode_wizard
+msgid "Patient Barcode Print"
+msgstr "طباعة باركود المريض"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__starting_position
+msgid "Position"
+msgstr "المنصب"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Print"
+msgstr "طباعة"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Provide Quantity"
+msgstr "توفير الكميه"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__quantity
+msgid "Quantity"
+msgstr "الكمية"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,help:acs_hms_barcode.field_hms_appointment__get_patient_barcode
+msgid "Read a Barcode to set patient detail."
+msgstr "اقرأ الباركود لإعطاء بيانات المريض."
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__rows
+msgid "Rows"
+msgstr "الصفوف"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Set Position Attribute"
+msgstr "ضبط مميزات المنصب"
+
+#. module: acs_hms_barcode
+#: code:addons/acs_hms_barcode/model/patient.py:0
+#, python-format
+msgid "There is no patient with Barcode: %s"
+msgstr ""
+
+#. module: acs_hms_barcode
+#: code:addons/acs_hms_barcode/model/patient.py:0
+#, python-format
+msgid ""
+"There next sequence is upper than 12 characters. This can't work.You will "
+"have to redefine the sequence or create a new one"
+msgstr ""
+
+#. module: acs_hms_barcode
+#: code:addons/acs_hms_barcode/model/patient.py:0
+#, python-format
+msgid "Warning!"
+msgstr ""
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "or"
+msgstr "أو"
+
+```
+
+  File: i18n/es.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_barcode
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 14.0-20210419\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-06-04 16:06+0000\n"
+"PO-Revision-Date: 2021-06-04 11:08-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 2.4.3\n"
+"Last-Translator: \n"
+"Language: es\n"
+
+#. module: acs_hms_barcode
+#: model:ir.actions.report,print_report_name:acs_hms_barcode.action_patient_barcode
+#: model:ir.actions.report,print_report_name:acs_hms_barcode.action_patient_barcode_lable
+msgid "(object.code or object.name).replace('/','_')+'_BarCode'"
+msgstr "(object.code or object.name).replace('/','_')+'_BarCode'"
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_hms_appointment
+msgid "Appointment"
+msgstr "Cita"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_patient__barcode
+msgid "Barcode"
+msgstr "Código de barras"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_appointment___barcode_scanned
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_treatment___barcode_scanned
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_prescription_order___barcode_scanned
+msgid "Barcode Scanned"
+msgstr "Código de barras escaneado"
+
+#. module: acs_hms_barcode
+#: model:ir.model.constraint,message:acs_hms_barcode.constraint_hms_patient_ean13_uniq
+msgid "Barcode must be unique!"
+msgstr "El código de barras debe ser único!"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Barcode patient Level"
+msgstr "Código de barras de paciente"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Cancel"
+msgstr "Cancelar"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__columns
+msgid "Columns"
+msgstr "Columnas"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__create_uid
+msgid "Created by"
+msgstr "Creado por"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__create_date
+msgid "Created on"
+msgstr "Creado el"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_appointment__display_name
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_patient__display_name
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_treatment__display_name
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__display_name
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_prescription_order__display_name
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_report_acs_hms_barcode_report_patient_barcode__display_name
+msgid "Display Name"
+msgstr "Nombre mostrado"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_patient_barcode_form
+msgid "Generate Barcode"
+msgstr "Generar Código de barra"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_appointment__id
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_patient__id
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_treatment__id
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__id
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_prescription_order__id
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_report_acs_hms_barcode_report_patient_barcode__id
+msgid "ID"
+msgstr "ID"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_appointment____last_update
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_patient____last_update
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_treatment____last_update
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard____last_update
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_prescription_order____last_update
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_report_acs_hms_barcode_report_patient_barcode____last_update
+msgid "Last Modified on"
+msgstr "Última modificación en"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__write_uid
+msgid "Last Updated by"
+msgstr "Última actualización por"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__write_date
+msgid "Last Updated on"
+msgstr "Última actualización el"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,help:acs_hms_barcode.field_hms_patient__barcode
+msgid "Number used for Patient identification."
+msgstr "Número utilizado para la identificación del paciente."
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_hms_patient
+msgid "Patient"
+msgstr "Paciente"
+
+#. module: acs_hms_barcode
+#: model:ir.actions.report,name:acs_hms_barcode.action_patient_barcode
+msgid "Patient BarCode"
+msgstr "C. barras de paciente"
+
+#. module: acs_hms_barcode
+#: model:ir.actions.report,name:acs_hms_barcode.action_patient_barcode_lable
+msgid "Patient BarCode LP"
+msgstr "C. barras de paciente LP"
+
+#. module: acs_hms_barcode
+#: model:ir.actions.act_window,name:acs_hms_barcode.action_patient_barcode_wiz
+#: model:ir.model,name:acs_hms_barcode.model_report_acs_hms_barcode_report_patient_barcode
+msgid "Patient Barcode"
+msgstr "C. barras de paciente"
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_patient_barcode_wizard
+msgid "Patient Barcode Print"
+msgstr "Imprimir C. B. de paciente"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__starting_position
+msgid "Position"
+msgstr "Cargo"
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_prescription_order
+msgid "Prescription Order"
+msgstr "Orden de prescripción"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Print"
+msgstr "Imprimir"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Provide Quantity"
+msgstr "Proporcionar cantidad"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__quantity
+msgid "Quantity"
+msgstr "Cantidad"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__rows
+msgid "Rows"
+msgstr "Filas"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Set Position Attribute"
+msgstr "Establecer atributo de puesto de trabajo"
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_hms_treatment
+msgid "Treatment"
+msgstr "Tratamiento"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,help:acs_hms_barcode.field_hms_appointment___barcode_scanned
+#: model:ir.model.fields,help:acs_hms_barcode.field_hms_treatment___barcode_scanned
+#: model:ir.model.fields,help:acs_hms_barcode.field_prescription_order___barcode_scanned
+msgid "Value of the last barcode scanned."
+msgstr "Valor del último código de barras escaneado."
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "or"
+msgstr "o"
+
+```
+
+  File: i18n/es_EC.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_barcode
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 15.0-20211110\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-11-19 20:45+0000\n"
+"PO-Revision-Date: 2021-11-19 15:49-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 3.0\n"
+"Last-Translator: \n"
+"Language: es_PA\n"
+
+#. module: acs_hms_barcode
+#: model:ir.actions.report,print_report_name:acs_hms_barcode.action_patient_barcode
+#: model:ir.actions.report,print_report_name:acs_hms_barcode.action_patient_barcode_lable
+msgid "(object.code or object.name).replace('/','_')+'_BarCode'"
+msgstr "(object.code or object.name).replace('/','_')+'_BarCode'"
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_hms_appointment
+msgid "Appointment"
+msgstr "Cita"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_patient__barcode
+msgid "Barcode"
+msgstr "Código de barras"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_appointment___barcode_scanned
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_treatment___barcode_scanned
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_prescription_order___barcode_scanned
+msgid "Barcode Scanned"
+msgstr "Código de barras escaneado"
+
+#. module: acs_hms_barcode
+#: model:ir.model.constraint,message:acs_hms_barcode.constraint_hms_patient_ean13_uniq
+msgid "Barcode must be unique!"
+msgstr "¡El código de barras debe ser único!"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Barcode patient Level"
+msgstr "Nivel de paciente con código de barras"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Cancel"
+msgstr "Cancelar"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__columns
+msgid "Columns"
+msgstr "Columnas"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__create_uid
+msgid "Created by"
+msgstr "Creado por"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__create_date
+msgid "Created on"
+msgstr "Creado el"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__display_name
+msgid "Display Name"
+msgstr "Nombre"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_patient_barcode_form
+msgid "Generate Barcode"
+msgstr "Generar código de barras"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__id
+msgid "ID"
+msgstr "Cédula o Pasaporte"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard____last_update
+msgid "Last Modified on"
+msgstr "Última modificación el"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__write_uid
+msgid "Last Updated by"
+msgstr "Última actualización por"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__write_date
+msgid "Last Updated on"
+msgstr "Última actualización el"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,help:acs_hms_barcode.field_hms_patient__barcode
+msgid "Number used for Patient identification."
+msgstr "Número utilizado para la identificación del paciente."
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_hms_patient
+msgid "Patient"
+msgstr "Paciente"
+
+#. module: acs_hms_barcode
+#: model:ir.actions.report,name:acs_hms_barcode.action_patient_barcode
+msgid "Patient BarCode"
+msgstr "Código de barras del paciente"
+
+#. module: acs_hms_barcode
+#: model:ir.actions.report,name:acs_hms_barcode.action_patient_barcode_lable
+msgid "Patient BarCode LP"
+msgstr "Código de barras del paciente LP"
+
+#. module: acs_hms_barcode
+#: model:ir.actions.act_window,name:acs_hms_barcode.action_patient_barcode_wiz
+#: model:ir.model,name:acs_hms_barcode.model_report_acs_hms_barcode_report_patient_barcode
+msgid "Patient Barcode"
+msgstr "Código de barras del paciente"
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_patient_barcode_wizard
+msgid "Patient Barcode Print"
+msgstr "Impresión de código de barras del paciente"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__starting_position
+msgid "Position"
+msgstr "Posición"
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_prescription_order
+msgid "Prescription Order"
+msgstr "Orden de Receta"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Print"
+msgstr "Imprimir"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Provide Quantity"
+msgstr "Proporcionar cantidad"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__quantity
+msgid "Quantity"
+msgstr "Cantidad"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__rows
+msgid "Rows"
+msgstr "Filas"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Set Position Attribute"
+msgstr "Establecer posición del atributo"
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_hms_treatment
+msgid "Treatment"
+msgstr "Tratamiento"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,help:acs_hms_barcode.field_hms_appointment___barcode_scanned
+#: model:ir.model.fields,help:acs_hms_barcode.field_hms_treatment___barcode_scanned
+#: model:ir.model.fields,help:acs_hms_barcode.field_prescription_order___barcode_scanned
+msgid "Value of the last barcode scanned."
+msgstr "Valor del último código de barras escaneado."
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "or"
+msgstr "o"
+
+```
+
+  File: i18n/es_PA.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_barcode
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 15.0-20211110\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2021-11-19 20:45+0000\n"
+"PO-Revision-Date: 2021-11-19 15:49-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 3.0\n"
+"Last-Translator: \n"
+"Language: es_PA\n"
+
+#. module: acs_hms_barcode
+#: model:ir.actions.report,print_report_name:acs_hms_barcode.action_patient_barcode
+#: model:ir.actions.report,print_report_name:acs_hms_barcode.action_patient_barcode_lable
+msgid "(object.code or object.name).replace('/','_')+'_BarCode'"
+msgstr "(object.code or object.name).replace('/','_')+'_BarCode'"
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_hms_appointment
+msgid "Appointment"
+msgstr "Cita"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_patient__barcode
+msgid "Barcode"
+msgstr "Código de barras"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_appointment___barcode_scanned
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_hms_treatment___barcode_scanned
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_prescription_order___barcode_scanned
+msgid "Barcode Scanned"
+msgstr "Código de barras escaneado"
+
+#. module: acs_hms_barcode
+#: model:ir.model.constraint,message:acs_hms_barcode.constraint_hms_patient_ean13_uniq
+msgid "Barcode must be unique!"
+msgstr "¡El código de barras debe ser único!"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Barcode patient Level"
+msgstr "Nivel de paciente con código de barras"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Cancel"
+msgstr "Cancelar"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__columns
+msgid "Columns"
+msgstr "Columnas"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__create_uid
+msgid "Created by"
+msgstr "Creado por"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__create_date
+msgid "Created on"
+msgstr "Creado el"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__display_name
+msgid "Display Name"
+msgstr "Nombre"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_patient_barcode_form
+msgid "Generate Barcode"
+msgstr "Generar código de barras"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__id
+msgid "ID"
+msgstr "Cédula o Pasaporte"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard____last_update
+msgid "Last Modified on"
+msgstr "Última modificación el"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__write_uid
+msgid "Last Updated by"
+msgstr "Última actualización por"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__write_date
+msgid "Last Updated on"
+msgstr "Última actualización el"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,help:acs_hms_barcode.field_hms_patient__barcode
+msgid "Number used for Patient identification."
+msgstr "Número utilizado para la identificación del paciente."
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_hms_patient
+msgid "Patient"
+msgstr "Paciente"
+
+#. module: acs_hms_barcode
+#: model:ir.actions.report,name:acs_hms_barcode.action_patient_barcode
+msgid "Patient BarCode"
+msgstr "Código de barras del paciente"
+
+#. module: acs_hms_barcode
+#: model:ir.actions.report,name:acs_hms_barcode.action_patient_barcode_lable
+msgid "Patient BarCode LP"
+msgstr "Código de barras del paciente LP"
+
+#. module: acs_hms_barcode
+#: model:ir.actions.act_window,name:acs_hms_barcode.action_patient_barcode_wiz
+#: model:ir.model,name:acs_hms_barcode.model_report_acs_hms_barcode_report_patient_barcode
+msgid "Patient Barcode"
+msgstr "Código de barras del paciente"
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_patient_barcode_wizard
+msgid "Patient Barcode Print"
+msgstr "Impresión de código de barras del paciente"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__starting_position
+msgid "Position"
+msgstr "Posición"
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_prescription_order
+msgid "Prescription Order"
+msgstr "Orden de Receta"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Print"
+msgstr "Imprimir"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Provide Quantity"
+msgstr "Proporcionar cantidad"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__quantity
+msgid "Quantity"
+msgstr "Cantidad"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,field_description:acs_hms_barcode.field_patient_barcode_wizard__rows
+msgid "Rows"
+msgstr "Filas"
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "Set Position Attribute"
+msgstr "Establecer posición del atributo"
+
+#. module: acs_hms_barcode
+#: model:ir.model,name:acs_hms_barcode.model_hms_treatment
+msgid "Treatment"
+msgstr "Tratamiento"
+
+#. module: acs_hms_barcode
+#: model:ir.model.fields,help:acs_hms_barcode.field_hms_appointment___barcode_scanned
+#: model:ir.model.fields,help:acs_hms_barcode.field_hms_treatment___barcode_scanned
+#: model:ir.model.fields,help:acs_hms_barcode.field_prescription_order___barcode_scanned
+msgid "Value of the last barcode scanned."
+msgstr "Valor del último código de barras escaneado."
+
+#. module: acs_hms_barcode
+#: model_terms:ir.ui.view,arch_db:acs_hms_barcode.view_product_barcode_wizard
+msgid "or"
+msgstr "o"
+
+```
+
+Static:
+  File: static/description/index.html
+  Content:
+```
+<head>
+  <style>
+      .backgrounds{background-color:#fff; color:#0B80E6}
+  </style>
+</head>
+
+<section class="oe_container">
+    <div class="mt32 mb32">
+        <div style="background-color: #2d9f9d; background-image: linear-gradient(#918c8c, #2d9f9d); background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%); border-radius: 10px 10px 10px 10px; min-height: 160px;">
+            <div class="text-white font-weight-bold" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                <div class="pt-2 text-center">
+                    <span>
+                    <span class="pt-2 text-center" style="font-size:27px;">Almighty Consulting Solutions Pvt. Ltd.</span><br/>
+                </div>
+                <div class="row mt16">
+                    <div class="col-4 text-center">
+                        <span>Supported Editions</span><br/> 
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Community 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Enterprise 
+                        </span>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <a href="https://www.almightycs.com" target="_blank">
+                            <img src="almightycs.png" width="80" height="auto">
+                        </a>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <span>Supported Hostings <br/></span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Odoo.sh 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Cloud
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>On Premise 
+                        </span><br/>
+                        <span class="pt-2 text-center" style="font-size:12px;">App can not be used on odoo online.</span><br/>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+ 
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12 oe_mt32 mb32">
+            <h3 class="oe_slogan">Patient Barcode in Hospital Management</h3><h4><br/>This Module Adds Barcode Support in appointment creation. Barcode can be printed in a4 and label printer also.</h4>
+        </div>
+    </div> 
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_demo o_picture o_screenshot">
+            <a href="http://www.almightycs.com/blog/blogs-1" target="_blank">
+                <img src="hms_menus_odoo_almightycs.png">
+            </a>
+            <div class="oe_demo_footer oe_centeralign">Hospital Management Menus.</div>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container mt32 mb32">
+    <div class="oe_row oe_spaced">
+        <div class='oe_span12 mt92 alert alert-success'>
+            <h3 class="text-center"> 
+                <i class="fa fa-star fa-spin fa-2x fa-fw"></i>
+                What is special from other HMS applications 
+                <i class="fa fa-star fa-spin fa-2x fa-fw"></i>
+            </h3>
+            <hr/>
+            <h2><i class="fa fa-hand-o-right text-success"></i> Clean Code</h2>
+            <h2><i class="fa fa-hand-o-right text-success"></i> Proper User Roles</h2>
+            <h2><i class="fa fa-hand-o-right text-success"></i> Record Rules and Access rights</h2>
+            <h2><i class="fa fa-hand-o-right text-success"></i> Clean Form Views</h2>
+            <h2><i class="fa fa-hand-o-right text-success"></i> Many more supporting modules to complete flow</h2>
+        </div>
+    </div>
+</section>
+
+
+<section class="oe_mt32">
+    <div class='text-center mt92'>
+        <h2> Detailed Description of Module</h2>
+    </div>
+    <div class="panel-body">
+        <div class="alert alert-info">
+            <a data-toggle="collapse" href="#acs_ipd"><i class="fa fa-plus-circle"></i></a>
+            <b> Hospital Barcode Management</b>
+            <b style="float:right"><a href="http://www.almightycs.com" target="_blank">By ACS </b>
+        </div>
+        <div id="acs_ipd" class="panel-collapse collapse in" class="oe_span12">
+            <h3><i class="fa fa-hand-o-right text-success"></i> Patiet Barcode Generation.</h3>
+            <h3><i class="fa fa-hand-o-right text-success"></i> Patiet Barcode printing in A4 Sheet.</h3>
+            <h3><i class="fa fa-hand-o-right text-success"></i> Patiet Barcode priting in label printer.</h3>
+            <h3><i class="fa fa-hand-o-right text-success"></i> Appointment creation support for patient.</h3>
+        </div>
+    </div>
+</section>
+
+<section>
+    <div class="oe_row oe_spaced">
+        <h4 class="oe_slogan"><a href="http://www.almightycs.com">Almighty Consulting Solutions Pvt. Ltd.</a> </h4>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12">
+            <h3 class="oe_slogan">Other Configuration</h3>
+            <p class="oe_slogan">To use this module no technical knowledge is required. Just install module and functionality is ready to use. For more customization and help contact us.</p>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span6">
+            <div class="oe_demo o_picture o_screenshot">
+                <a href="https://www.almightycs.com" target="_blank">
+                    <img src="acs.png" width="200" height="auto">
+                </a>
+                <div class="oe_demo_footer oe_centeralign">Meet Us</div>
+            </div>
+        </div>
+        <div class="oe_span6">
+            <br/><br/>
+            <h2 class="oe_slogan">Do you need help?</h2>
+            <h3 class="oe_slogan">
+                Let's offer you the best services!
+            </h3>
+            <p class="oe_mt32 text-center">
+                Contact us by our official channels.
+            </p>
+            <p class="oe_mt32 text-center">
+                Skype: turkesh4friends 
+            </p>
+            <div class="oe_spaced">
+                <ul class="text-center list-inline">
+                    <li>
+                        <a href="https://www.linkedin.com/organization-guest/company/almighty-consulting-services" Target="_blank"><i class="fa fa-linkedin-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://www.facebook.com/AlmightyCS.ERP" Target="_blank"><i class="fa fa-facebook-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://github.com/tpa-odoo" Target="_blank"><i class="fa fa-github-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="mailto:info@almightycs.com" Target="_blank"><i class="fa fa-envelope-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://twitter.com/_AlmightyCS" Target="_blank" ><i class="fa fa-twitter-square fa-xs backgrounds"></i></a>
+                    </li>
+
+                    <li>
+                        <a title="Contact us" data-toggle="tooltip" data-placement="left" Target="_blank" href="https://www.almightycs.com/contactus"><i class="fa fa-globe fa-xs backgrounds"></i></a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+<section class="oe_container">
+
+    <div data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: fixed;
+            bottom: 10px;
+            right: 20px;
+            z-index: 1000;
+            box-shadow: 1px 2px 11px rgba(0, 0, 0, 0.3), -5px 7px 12px rgba(0, 0, 0, 0.22);
+            cursor: pointer;">
+        <span class="fa fa-2x fa-handshake-o"></span>
+    </div>
+    
+    <div class="collapse show" id="contactus-floating" style="z-index: 1006; position: fixed; bottom: 10px; right: 20px;">
+        <div style="width:246px; overflow: hidden;">
+            <div class="text-center acs-contactus-close" data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+                    width: 25px;
+                    height: 25px;
+                    margin-bottom: -25px;
+                    display: flex;
+                    color: white;
+                    align-items: center;
+                    justify-content: center;
+                    position: relative;
+                    z-index: 1000;
+                    cursor: pointer;">
+                <i class="fa fa-times"></i>
+            </div>
+            <div class="acs-contactus-data" style="
+                    margin-top: -17px;
+                    background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+                    border-radius: 10px 10px 10px 10px;
+                    padding-bottom: 10px;
+                    height: 106px;">
+                <div class="text-center" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                    <span class="pt-2 text-white font-weight-bold" style="">Contact AlmightyCS</span>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; font-size: 14px;">  
+                    <a href="skype:turkesh4friends" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-skype" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Skype</span>
+                    </a>
+                    <a href="https://www.almightycs.com" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-globe fa-spin" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Website</span>
+                    </a>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; 
+                    font-size: 14px; 
+                    padding-bottom: 20px; 
+                    padding-top: 22px;"> 
+                    <a href="mailto:info@almightycs.com" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-envelope" style="font-size: 19px;"></i>
+                        <span class="pt-2 font-weight-bold">Email</span>
+                    </a>
+                    <a href="https://www.almightycs.com/contactus" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-handshake-o" style="font-size: 20px;"></i>
+                        <span class="pt-2 font-weight-bold">Contactus</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div> 
+
+</section>
+```
+
+Doc:
+  File: doc/changelog.rst
+  Content:
+```
+`1.0.1                                                        [12/10/2023]`
+***************************************************************************
+- Migrated Module for v17
+```
+
+Other_files:
+  File: model/__init__.py
+  Content:
+```
+# -*- encoding: utf-8 -*-
+
+from . import patient
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: model/patient.py
+  Content:
+```
+# -*- encoding: utf-8 -*-
+
+from odoo import api, fields, models, _
+from odoo.exceptions import UserError
+
+def isodd(x):
+    return bool(x % 2)
+
+class ACSPatient(models.Model):
+    _inherit = "hms.patient"
+
+    barcode = fields.Char(string='Barcode', help="Number used for Patient identification.")
+
+    _sql_constraints = [('ean13_uniq', 'UNIQUE(barcode)', 'Barcode must be unique!'),]
+
+
+    def generate_barcode(self):
+        ean = self.env['ir.sequence'].next_by_code('patient.barcode') or '/'
+        if len(ean) > 12:
+            raise UserError(_("There next sequence is upper than 12 characters. This can't work."
+                   "You will have to redefine the sequence or create a new one"))
+        else:
+            ean = (len(ean[0:6]) == 6 and ean[0:6] or ean[0:6].ljust(6,'0')) + ean[6:].rjust(6,'0')
+        sum = 0
+        for i in range(12):
+            if isodd(i):
+                sum += 3 * int(ean[i])
+            else:
+                sum += int(ean[i])
+        key = (10 - sum % 10) % 10
+        self.barcode = ean + str(key)
+
+
+class HmsAppointment(models.Model):
+    _name = 'hms.appointment'
+    _inherit = ['hms.appointment', 'barcodes.barcode_events_mixin']
+
+    def on_barcode_scanned(self, barcode):
+        if barcode and self.state=='draft':
+            patient_id = self.env['hms.patient'].search([('barcode','=',barcode)], limit=1)
+            if not patient_id:
+                patient_id = self.env['hms.patient'].search([('code','=',barcode)], limit=1)
+
+            if patient_id:
+                self.patient_id = patient_id.id
+                self.physician_id = patient_id.primary_physician_id and patient_id.primary_physician_id.id or False
+
+            else:
+                raise UserError(_('There is no patient with Barcode: %s') % (barcode))
+        return
+
+
+class PrescriptionOder(models.Model):
+    _name = 'prescription.order'
+    _inherit = ['prescription.order', 'barcodes.barcode_events_mixin']
+
+    def on_barcode_scanned(self, barcode):
+        if barcode and self.state=='draft':
+            patient_id = self.env['hms.patient'].search([('barcode','=',barcode)], limit=1)
+            if not patient_id:
+                patient_id = self.env['hms.patient'].search([('code','=',barcode)], limit=1)
+
+            if patient_id:
+                self.patient_id = patient_id.id
+                self.physician_id = patient_id.primary_physician_id and patient_id.primary_physician_id.id or False
+            else:
+                raise UserError(_('There is no patient with Barcode: %s') % (barcode))
+        return
+
+
+class HmsTreatment(models.Model):
+    _name = 'hms.treatment'
+    _inherit = ['hms.treatment', 'barcodes.barcode_events_mixin']
+
+    def on_barcode_scanned(self, barcode):
+        if barcode and self.state=='draft':
+            patient_id = self.env['hms.patient'].search([('barcode','=',barcode)], limit=1)
+            if not patient_id:
+                patient_id = self.env['hms.patient'].search([('code','=',barcode)], limit=1)
+
+            if patient_id:
+                self.patient_id = patient_id.id
+                self.physician_id = patient_id.primary_physician_id and patient_id.primary_physician_id.id or False
+            else:
+                raise UserError(_('There is no patient with Barcode: %s') % (barcode))
+        return
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: report/__init__.py
+  Content:
+```
+# -*- encoding: utf-8 -*-
+
+from . import patient_barcode
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: report/barcode_report_view.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <template id="patient_barcode_table">
+        <div style="width:350px; height:310px; float:left; margin:0 50px; margin-bottom:1px; font-size:19px; border:0px solid #fff; margin-left:30px;">
+            <table class="table">
+                <tr>
+                    <td>
+                        <div class="row">
+                            <div class="col-7">
+                                <span t-esc="patient.name"/>
+                                <span t-esc="patient.partner_id"
+                                    t-options='{"widget": "contact", "fields": ["address"], "no_marker": true}'/>
+                            </div>
+                            <div class="col-4">
+                                <span t-field="patient.image_128"
+                                    t-options="{'widget': 'image', 'class': 'img-rounded'}"/>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="float:left;">
+                        <center>
+                            <div t-if="patient.barcode" t-field="patient.barcode" class="barcode" t-options="{'widget': 'barcode', 'symbology': 'Code128', 'width': 440, 'height': 90, 'humanreadable': 1, 'img_align': 'center'}"/>
+                        </center>
+                    </td>
+                </tr>
+            </table>
+        </div>
+    </template>
+
+    <!-- A4 Paper Format -->
+    <template id="report_patient_barcode">
+        <t t-call="web.html_container">
+            <t t-foreach="docs" t-as="doc">
+                <t t-call="web.basic_layout">
+                    <div class="page">
+                        <t t-if="starting_position">
+                            <t t-foreach="range(starting_position-1)" t-as="s">
+                                <div style="width:350px;height:210px;float:left;margin:0 40px;font-size:13px;margin-bottom:1px;border:0px solid #fff;margin-left:10px;">
+                                    <table class="table">
+                                        <tr>
+                                            <td>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </div>
+                            </t>
+                        </t>
+                        <t t-foreach="range(quantity)" t-as="l">
+                            <t t-call="acs_hms_barcode.patient_barcode_table">
+                                <t t-set="patient" t-value="doc"/>
+                            </t>
+                        </t>
+                    </div>
+                </t>
+            </t>
+        </t>
+    </template>
+
+    <record id="action_patient_barcode" model="ir.actions.report">
+        <field name="name">Patient BarCode</field>
+        <field name="model">hms.patient</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">acs_hms_barcode.report_patient_barcode</field>
+        <field name="report_file">acs_hms_barcode.report_patient_barcode</field>
+        <field name="print_report_name">(object.code or object.name).replace('/','_')+'_BarCode'</field>
+        <field name="binding_model_id" ref="model_hms_patient"/>
+        <field name="binding_type">action</field>
+        <field name="groups_id" eval="[(4, ref('acs_hms.group_hms_receptionist'))]"/>
+    </record>
+
+    <!-- Label Printer Format -->
+
+    <template id="report_patient_barcode_lable">
+        <t t-call="web.html_container">
+            <t t-foreach="docs" t-as="doc"> 
+                <t t-call="web.basic_layout">
+                    <t t-set="doc" t-value="doc.with_context({'lang':doc.lang})"/>
+                    <div class="page">
+                        <div class="oe_structure"/>
+                        <t t-call="acs_hms_barcode.patient_barcode_table">
+                            <t t-set="patient" t-value="doc"/>
+                        </t>
+                    </div>
+                </t>
+            </t>
+        </t>
+    </template>
+
+    <record id="action_patient_barcode_lable" model="ir.actions.report">
+        <field name="name">Patient BarCode LP</field>
+        <field name="model">hms.patient</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">acs_hms_barcode.report_patient_barcode_lable</field>
+        <field name="report_file">acs_hms_barcode.report_patient_barcode_lable</field>
+        <field name="print_report_name">(object.code or object.name).replace('/','_')+'_BarCode'</field>
+        <field name="binding_model_id" ref="model_hms_patient"/>
+        <field name="groups_id" eval="[(4, ref('acs_hms.group_hms_receptionist'))]"/>
+        <field name="binding_type">report</field>
+    </record>
+
+</odoo>
+```
+
+  File: report/paper_format.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="a4_paperformat_acs_barcode" model="report.paperformat">
+        <field name="name">Barcode Paper A4</field>
+        <field name="default" eval="True" />
+        <field name="format">A4</field>
+        <field name="page_height">0</field>
+        <field name="page_width">0</field>
+        <field name="orientation">Portrait</field>
+        <field name="margin_top">10</field>
+        <field name="margin_bottom">0</field>
+        <field name="margin_left">1</field>
+        <field name="margin_right">0</field>
+        <field name="header_line" eval="False" />
+        <field name="header_spacing">0</field>
+        <field name="dpi">90</field>
+        <field name="report_ids" eval="[(6,0, [ref('acs_hms_barcode.action_patient_barcode')])]"/>
+    </record>
+
+    <record id="paperformat_acs_barcode" model="report.paperformat">
+        <field name="name">Barcode Paper</field>
+        <field name="default" eval="True" />
+        <field name="format">custom</field>
+        <field name="page_height">60</field>
+        <field name="page_width">75</field>
+        <field name="orientation">Portrait</field>
+        <field name="margin_top">5</field>
+        <field name="margin_bottom">0</field>
+        <field name="margin_left">0</field>
+        <field name="margin_right">0</field>
+        <field name="header_line" eval="False" />
+        <field name="header_spacing">0</field>
+        <field name="dpi">95</field>
+        <field name="report_ids" eval="[(6,0, [ref('acs_hms_barcode.action_patient_barcode_lable')])]"/>
+    </record>
+
+</odoo>
+
+```
+
+  File: report/patient_barcode.py
+  Content:
+```
+# # -*- coding: utf-8 -*-
+
+from odoo import api, models
+
+class acs_hms_barcode(models.AbstractModel):
+    _name = 'report.acs_hms_barcode.report_patient_barcode'
+    _description = "Patient Barcode"
+
+    @api.model
+    def _get_report_values(self, docids, data=None):
+        data = data if data is not None else {}
+        patient = self.env['hms.patient'].browse(data.get('ids', data.get('active_ids')))
+        quantity = data.get('form', {}).get('quantity', False)
+        starting_position = data.get('form', {}).get('starting_position', False)
+        return {
+            'doc_ids': data.get('ids', data.get('active_ids')),
+            'doc_model': 'hms.patient',
+            'docs': patient,
+            'quantity': int(quantity),
+            'starting_position': int(starting_position),
+            'data': dict(
+                data,
+            ),
+        }
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: wizard/__init__.py
+  Content:
+```
+# -*- encoding: utf-8 -*-
+
+from . import patient_barcode_wizard
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: wizard/patient_barcode_wizard.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from odoo import api, fields, models
+
+class PatientBarcodeWizard(models.TransientModel):
+    _name = 'patient.barcode.wizard'
+    _description = "Patient Barcode Print"
+
+    @api.depends('rows', 'columns')
+    def _starting_position(self):
+        self.starting_position = (((self.rows-1)*2) + self.columns)
+
+    columns = fields.Integer(string="Columns",default="1")
+    rows = fields.Integer(string="Rows",default="1")
+    quantity = fields.Integer(string="Quantity",default="1")
+    starting_position = fields.Integer(compute=_starting_position,string="Position",readonly=True)
+
+
+    def print_report(self):
+        datas = {'ids': self.env.context.get('active_ids', [])}
+        res = self.read([])
+        res = res and res[0] or {}
+        datas['form'] = res
+        return self.env.ref('acs_hms_barcode.action_patient_barcode').report_action([], data=datas)
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+
+```
+
+  File: wizard/patient_barcode_wizard.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_product_barcode_wizard" model="ir.ui.view">
+        <field name="name">Patient Barcode</field>
+        <field name="model">patient.barcode.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Barcode patient Level">
+                <group string="Set Position Attribute">
+                    <field name="columns"/>
+                    <field name="rows"/>
+                </group>
+                <group string="Provide Quantity">
+                    <field name="quantity"/>
+                    <field name="starting_position"/>
+                </group>
+                <footer>
+                    <button name="print_report" string="Print" type="object"  class="oe_highlight"  />
+                    or
+                    <button string="Cancel" class="oe_link" special="cancel" />
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_patient_barcode_wiz" model="ir.actions.act_window">
+        <field name="name">Patient Barcode</field>
+        <field name="type">ir.actions.act_window</field>
+        <field name="res_model">patient.barcode.wizard</field>
+        <field name="binding_model_id" ref="acs_hms_base.model_hms_patient"/>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+</odoo>
+```
+

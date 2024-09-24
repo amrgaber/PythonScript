@@ -1,0 +1,1978 @@
+Addon: acs_hms_ambulance
+
+Manifest: __manifest__.py
+Content:
+```python
+# -*- coding: utf-8 -*-
+#╔══════════════════════════════════════════════════════════════════════╗
+#║                                                                      ║
+#║                  ╔═══╦╗       ╔╗  ╔╗     ╔═══╦═══╗                   ║
+#║                  ║╔═╗║║       ║║ ╔╝╚╗    ║╔═╗║╔═╗║                   ║
+#║                  ║║ ║║║╔╗╔╦╦══╣╚═╬╗╔╬╗ ╔╗║║ ╚╣╚══╗                   ║
+#║                  ║╚═╝║║║╚╝╠╣╔╗║╔╗║║║║║ ║║║║ ╔╬══╗║                   ║
+#║                  ║╔═╗║╚╣║║║║╚╝║║║║║╚╣╚═╝║║╚═╝║╚═╝║                   ║
+#║                  ╚╝ ╚╩═╩╩╩╩╩═╗╠╝╚╝╚═╩═╗╔╝╚═══╩═══╝                   ║
+#║                            ╔═╝║     ╔═╝║                             ║
+#║                            ╚══╝     ╚══╝                             ║
+#║                  SOFTWARE DEVELOPED AND SUPPORTED BY                 ║
+#║                ALMIGHTY CONSULTING SOLUTIONS PVT. LTD.               ║
+#║                      COPYRIGHT (C) 2016 - TODAY                      ║
+#║                      https://www.almightycs.com                      ║
+#║                                                                      ║
+#╚══════════════════════════════════════════════════════════════════════╝
+{ 
+    'name': 'Hospital Ambulance Management',
+    'summary': 'Hospital Ambulance Management System by AlmightyCS',
+    'description': """
+        This Module will install Ambulance Module, which will help to register Ambulance bookings, Fleet management, Invoicing and related tracking. Almightycs acs hms medical hospital hims
+    """,
+    'version': '1.0.1',
+    'category': 'Medical',
+    'author': 'Almighty Consulting Solutions Pvt. Ltd.',
+    'website': 'https://www.almightycs.com',
+    'license': 'OPL-1',
+    'depends': ['acs_hms','fleet'],
+    'data': [
+        'security/hms_security.xml',
+        'security/ir.model.access.csv',
+        'data/data.xml',
+        'views/ambulance_views.xml',
+        'views/hms_base_view.xml',
+        'views/res_config_view.xml',
+        'views/menu_items.xml',
+    ],
+    'images': [
+        'static/description/hms_almightycs_cover.jpg',
+    ],
+    'installable': True,
+    'application': True,
+    'sequence': 2,
+    'price': 36,
+    'currency': 'USD',
+}
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+__init__.py:
+Content:
+```python
+# -*- coding: utf-8 -*-
+
+from . import models
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+Models:
+  File: models/__init__.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from . import res_config
+from . import hms_base
+from . import ambulance_service
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: models/ambulance_service.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from odoo import api, fields, models, _
+from odoo.exceptions import UserError
+from datetime import timedelta, datetime
+
+
+class AcsAmbulanceService(models.Model):
+    _name = 'acs.ambulance.service'
+    _description = 'Ambulance Service'
+    _inherit = ['mail.thread', 'mail.activity.mixin', 'acs.hms.mixin']
+
+
+    @api.model
+    def _get_service_id(self):
+        service_product = False
+        if self.env.company.acs_ambulance_invoicing:
+            service_product = self.env.company.acs_ambulance_invoicing_product_id.id
+        return service_product
+
+    name = fields.Char(string='Name', copy=False, default="/", tracking=True)
+    patient_id = fields.Many2one('hms.patient', ondelete='cascade', 
+        string='Patient', tracking=True)
+    user_id = fields.Many2one('res.users', ondelete='restrict', string='Responsible', 
+        help="Nurse/User", default=lambda self: self.env.user, required=True, domain=[('share','=',False)])
+    vehicle_id = fields.Many2one('fleet.vehicle', ondelete='restrict', string='Vehicle', 
+        help="Ambulance Vehicle", required=True, tracking=True)
+    driver_id = fields.Many2one('res.partner', ondelete='restrict', string='Driver', 
+        help="Responsible Person", required=True, domain="[('is_driver','=',True)]")
+    date = fields.Datetime('Date', default=fields.Datetime.now, required=True, tracking=True)
+    date_to = fields.Datetime('Date Till', default=fields.datetime.now() + timedelta(minutes=120), required=True, tracking=True)
+    pick_location = fields.Char('Pick Location')
+    drop_location = fields.Char('Drop Location')
+    remark = fields.Text('Remark')
+    state = fields.Selection([
+        ('draft','Draft'),
+        ('confirm','Confirm'),
+        ('to_invoice', 'To Invoice'),
+        ('done','Done'),
+        ('cancel','Cancel')], default="draft", string="Status", tracking=True)
+    service_product_id = fields.Many2one('product.product', ondelete='restrict', 
+        string='Ambulance Service', help="Ambulance Charge Service", 
+        domain=[('type', '=', "ambulance")], default=_get_service_id)
+    price = fields.Float(string="Price")
+    invoice_id = fields.Many2one('account.move', string='Invoice', ondelete='cascade', copy=False)
+    company_id = fields.Many2one('res.company', ondelete='restrict',
+        string='Hospital', default=lambda self: self.env.company)
+    acs_ambulance_invoicing = fields.Boolean(related='company_id.acs_ambulance_invoicing',string='Allow Ambulance Service Invoicing', readonly=True)
+    odometer_start = fields.Float('Odometer Start')
+    odometer_stop = fields.Float('Odometer Stop')
+    invoice_exempt = fields.Boolean(string='Invoice Exempt', readonly=True)
+    department_id = fields.Many2one('hr.department', ondelete='restrict', 
+        domain=[('patient_department', '=', True)], string='Department', tracking=True)
+
+    @api.onchange('vehicle_id')
+    def onchange_vehicle(self):
+        if self.vehicle_id:
+            self.driver_id = self.vehicle_id.driver_id.id
+            self.odometer_start = self.vehicle_id.odometer
+            if self.vehicle_id.service_product_id:
+                self.service_product_id = self.vehicle_id.service_product_id.id
+            if self.vehicle_id.user_id:
+                self.user_id = self.vehicle_id.user_id.id
+
+    @api.onchange('service_product_id')
+    def onchange_service_product(self):
+        if self.service_product_id:
+            self.price = self.service_product_id.lst_price
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        for values in vals_list:
+            if values.get('name', '/') == '/':
+                values['name'] = self.env['ir.sequence'].next_by_code('acs.ambulance.service') or ''
+        return super().create(vals_list)
+
+    def unlink(self):
+        for data in self:
+            if data.state in ['done']:
+                raise UserError(('You can not delete record in done state'))
+        return super(AcsAmbulanceService, self).unlink()
+
+    def action_confirm(self):
+        self.state = 'confirm'
+
+    def action_done(self):
+        if self.odometer_stop:
+            self.env['fleet.vehicle.odometer'].create({
+                'vehicle_id': self.vehicle_id.id,
+                'value': self.odometer_stop,
+                'driver_id': self.driver_id.id,
+            })
+        if self.env.company.acs_ambulance_invoicing and not self.invoice_exempt:
+            self.state = 'to_invoice'
+        else:
+            self.state = 'done'
+
+    def action_cancel(self):
+        self.state = 'cancel' 
+
+    def action_create_invoice(self):
+        product_id = self.service_product_id or self.env.company.acs_ambulance_invoicing_product_id
+        if not product_id:
+            raise UserError(_("Please Set Service Product first for Ambulance Service in Configuration."))
+        product_data = [{'product_id': product_id, 'price_unit': self.price}]
+        inv_data = {}
+        invoice = self.acs_create_invoice(partner=self.patient_id.partner_id, patient=self.patient_id, product_data=product_data, inv_data=inv_data)
+        self.invoice_id = invoice.id
+        if self.state == 'to_invoice':
+            self.state = 'done'
+
+    def view_invoice(self):
+        invoices = self.mapped('invoice_id')
+        return self.acs_action_view_invoice(invoices)
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4: 
+```
+
+  File: models/hms_base.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+
+from odoo import api, fields, models, _
+
+
+class ResPartner(models.Model):
+    _inherit = 'res.partner'
+
+    def _ambulance_drive_count(self):
+        for rec in self: 
+            rec.acs_ambulance_drive_count = len(rec.sudo().acs_ambulance_drive_ids.ids)
+
+    is_driver = fields.Boolean('Is Driver')
+    acs_ambulance_drive_ids = fields.One2many('acs.ambulance.service', 'driver_id', 'Ambulance Drives')
+    acs_ambulance_drive_count = fields.Integer(compute="_ambulance_drive_count", string='#Ambulance Drives')
+
+    def view_acs_ambulance_drive(self):
+        action = self.env["ir.actions.actions"]._for_xml_id("acs_hms_ambulance.action_acs_ambulance_service")
+        action['domain'] = [('driver_id', '=', self.id)]
+        action['context'] = {'default_driver_id': self.id}
+        return action
+
+
+class HMSPatient(models.Model):
+    _inherit = 'hms.patient'
+
+    def _ambulance_service_count(self):
+        for rec in self: 
+            rec.acs_ambulance_service_count = len(rec.acs_ambulance_service_ids.ids)
+
+    acs_ambulance_service_ids = fields.One2many('acs.ambulance.service','patient_id', 'Ambulance Services')
+    acs_ambulance_service_count = fields.Integer(compute="_ambulance_service_count", string='#Ambulance Services', groups="acs_hms_ambulance.group_ambulance_service_user")
+
+    def view_acs_ambulance_service(self):
+        action = self.env["ir.actions.actions"]._for_xml_id("acs_hms_ambulance.action_acs_ambulance_service")
+        action['domain'] = [('patient_id', '=', self.id)]
+        action['context'] = {'default_patient_id': self.id}
+        return action
+
+
+class ProductTemplate(models.Model):
+    _inherit = 'product.template'
+
+    hospital_product_type = fields.Selection(selection_add=[('ambulance','Ambulance')])
+
+
+class FleetVehicle(models.Model):
+    _inherit = 'fleet.vehicle'
+
+    service_product_id = fields.Many2one('product.product', 
+        domain=[('type','=','service')], string='Ambulance Invoicing Product', 
+        ondelete='restrict', help='Ambulance Invoicing Product')
+    user_id = fields.Many2one('res.users',  string='Doctor/Nurse', ondelete='restrict')
+
+# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:
+```
+
+  File: models/res_config.py
+  Content:
+```
+# -*- coding: utf-8 -*-
+# Part of AlmightyCS See LICENSE file for full copyright and licensing details.
+
+from odoo import api, fields, models
+
+
+class ResCompany(models.Model):
+    _inherit = "res.company"
+
+    acs_ambulance_invoicing = fields.Boolean("Allow Ambulance Invoicing", default=True)
+    acs_ambulance_invoicing_product_id = fields.Many2one('product.product', 
+        domain=[('type','=','service')],
+        string='Ambulance Invoicing Product', 
+        ondelete='restrict', help='Ambulance Invoicing Product')
+
+
+class ResConfigSettings(models.TransientModel):
+    _inherit = 'res.config.settings'
+
+    acs_ambulance_invoicing = fields.Boolean("Allow Ambulance Invoicing", related='company_id.acs_ambulance_invoicing', readonly=False)
+    acs_ambulance_invoicing_product_id = fields.Many2one('product.product', 
+        related='company_id.acs_ambulance_invoicing_product_id', readonly=False,
+        domain=[('type','=','service')],
+        string='Ambulance Invoicing Product', 
+        ondelete='restrict', help='Ambulance Invoicing Product')
+```
+
+Views:
+  File: views/ambulance_views.xml
+  Content:
+```
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+
+    <!-- Ambulance Service -->
+    <record id="acs_acs_ambulance_service_form" model="ir.ui.view">
+        <field name="name">acs.ambulance.service.form</field>
+        <field name="model">acs.ambulance.service</field>
+        <field name="arch" type="xml">
+            <form string="Ambulance Service">
+                <header>
+                    <button name="action_confirm" invisible="state!='draft'" class="oe_highlight" string="Confirm" type="object"/>
+                    <button name="action_done" invisible="state!='confirm'" class="oe_highlight" string="Done" type="object"/>
+                    <button name="action_create_invoice" string="Create Invoice" type="object" invisible="state!='to_invoice'" class="oe_highlight" groups="account.group_account_invoice"/>
+                    <button name="view_invoice" string="View Invoice" type="object" invisible="not invoice_id" class="oe_highlight" groups="account.group_account_invoice"/>
+                    <button name="action_cancel" invisible="state!='draft'" string="Cancel" type="object"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,confirm,done" statusbar_colors='{"draft":"blue","cancel":"red"}'/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" readonly="1"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="patient_id" readonly="state in ('to_invoice','cancel','done')"/>
+                            <label for="date"/>
+                            <div name="date">
+                                <div>
+                                    <field name="date" class="oe_inline" readonly="state in ('to_invoice','cancel','done')"/>-<field name="date_to" class="oe_inline" readonly="state in ('to_invoice','cancel','done')"/>
+                                </div>
+                            </div>
+                            <field name="user_id" readonly="state in ('to_invoice','cancel','done')"/>
+                            <field name="department_id" readonly="state in ('to_invoice','cancel','done')" groups="acs_hms.group_allow_multi_department"/>
+                            <field name="invoice_id" invisible="1"/>
+                            <field name="acs_ambulance_invoicing" invisible="1"/>
+                        </group>
+                        <group>
+                            <field name="pick_location" readonly="state in ('to_invoice','cancel','done')"/>
+                            <field name="drop_location" readonly="state in ('to_invoice','cancel','done')"/>
+                            <field name="company_id" readonly="state in ('to_invoice','cancel','done')" groups="base.group_multi_company" options="{'no_create': True}"/>
+                        </group>
+                    </group>
+
+                    <separator string="Vehicle"/>
+                    <group>
+                        <group>
+                            <field name="vehicle_id" readonly="state in ('to_invoice','cancel','done')"/>
+                            <field name="odometer_start" readonly="state in ('to_invoice','cancel','done')"/>
+                        </group>
+                        <group>
+                            <field name="driver_id" readonly="state in ('to_invoice','cancel','done')"/>
+                            <field name="odometer_stop" readonly="state in ('to_invoice','cancel','done')"/>
+                        </group>
+                    </group>
+
+                    <separator string="Service Charge" invisible="not acs_ambulance_invoicing"/>
+                    <group invisible="not acs_ambulance_invoicing">
+                        <group>
+                            <field name="service_product_id" readonly="state in ('to_invoice','cancel','done')"/>
+                            <label for="invoice_exempt"/>
+                            <div name='invoice_exemption'>
+                                <field name='invoice_exempt' class="oe_inline" nolabel="1" readonly="1"/>
+                                <button name="acs_apply_invoice_exemption" string="Apply/Remove" type="object" class="oe_inline fa fa-arrow-right oe_link" invisible="not invoice_id" groups="acs_hms_base.group_acs_invoice_exemption"/>
+                            </div>
+                        </group>
+                        <group>
+                            <field name="price" invisible="invoice_exempt" readonly="state in ('to_invoice','cancel','done')"/>
+                        </group>
+                    </group>
+                    <field name="remark" nolabel="1" placeholder="Notes..."
+                       />
+                </sheet>
+                <div class="oe_chatter">
+                    <field name="message_follower_ids" widget="mail_followers"/>
+                    <field name="activity_ids" widget="mail_activity"/>
+                    <field name="message_ids" widget="mail_thread"/>
+                </div>
+            </form>
+        </field>
+    </record>
+
+    <record id="acs_acs_ambulance_service_tree" model="ir.ui.view">
+        <field name="name">acs.ambulance.service.tree</field>
+        <field name="model">acs.ambulance.service</field>
+        <field name="arch" type="xml">
+            <tree string="Ambulance Service">
+                <field name="name"/>
+                <field name="date"/>
+                <field name="state" decoration-info="state=='draft'" decoration-danger="state=='cancel'" decoration-success="state=='done'" decoration-primary="state=='to_invoice'" decoration-warning="state=='confirm'" widget="badge"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="acs_acs_ambulance_service_calendar" model="ir.ui.view">
+        <field name="name">acs.ambulance.service.calendar</field>
+        <field name="model">acs.ambulance.service</field>
+        <field name="type">calendar</field>
+        <field name="arch" type="xml">
+            <calendar string="Ambulance Service" color="driver_id" date_start="date" date_stop="date_to">
+                <field name="driver_id"/>
+                <field name="user_id"/>
+                <field name="patient_id"/>
+                <field name="state"/>
+            </calendar>
+        </field>
+    </record>
+
+    <record id="acs_acs_ambulance_service_pivot" model="ir.ui.view">
+        <field name="name">acs.ambulance.service.pivot</field>
+        <field name="model">acs.ambulance.service</field>
+        <field name="arch" type="xml">
+            <pivot string="Ambulance Service">
+                <field name="date" type="row"/>
+                <field name="driver_id" type="row"/>
+                <field name="user_id" type="row"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="acs_acs_amvulance_service_search" model="ir.ui.view">
+        <field name="name">acs.ambulance.service.search</field>
+        <field name="model">acs.ambulance.service</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/>
+                <field name="vehicle_id"/>
+                <field name="company_id"/>
+                <field name="pick_location"/>
+                <field name="drop_location"/>
+                <field name="driver_id"/>
+                <group expand="0" string="Group By...">
+                    <filter string="Company" name="company_group" domain="[]" context="{'group_by':'company_id'}"/>
+                    <filter string="Driver" name="driver_group" domain="[]" context="{'group_by':'driver_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_acs_ambulance_service" model="ir.actions.act_window">
+        <field name="name">Ambulance Service</field>
+        <field name="res_model">acs.ambulance.service</field>
+        <field name="view_mode">tree,form,calendar,pivot,search</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Click to add a Ambulance Service.
+            </p>
+        </field>
+    </record>
+
+</odoo>
+```
+
+  File: views/hms_base_view.xml
+  Content:
+```
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+
+    <!-- Patient View -->
+    <record id="view_patient_form" model="ir.ui.view">
+        <field name="name">hms.patient.form</field>
+        <field name="model">hms.patient</field>
+        <field name="inherit_id" ref="acs_hms.view_patient_form"/>
+        <field name="arch" type="xml">
+            <div name="button_box" position="inside">
+                <button name="view_acs_ambulance_service" type="object" class="oe_stat_button" groups="acs_hms_ambulance.group_ambulance_service_user" icon="fa-ambulance">
+                    <field string="Ambulance Services" name="acs_ambulance_service_count" widget="statinfo"/>
+                </button>
+            </div>
+        </field>
+    </record>
+
+    <!-- Fleet View -->
+    <record id="fleet_vehicle_view_form" model="ir.ui.view">
+        <field name="name">fleet.vehicle.form</field>
+        <field name="model">fleet.vehicle</field>
+        <field name="inherit_id" ref="fleet.fleet_vehicle_view_form"/>
+        <field name="arch" type="xml">
+            <group position="inside">
+                <group string="Hospital">
+                    <field name="service_product_id"/>
+                    <field name="user_id"/>
+                </group>
+            </group>
+        </field>
+    </record>
+
+    <!-- Partner View -->
+    <record id="view_hms_partner_form" model="ir.ui.view">
+        <field name="name">res.partner</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="acs_hms.view_hms_partner_form"/>
+        <field name="type">form</field>
+        <field name="arch" type="xml">
+            <xpath expr="//page[@name='hms_info']" position="inside">
+                <separator string="Ambulance Services"/>
+                <group>
+                    <group>
+                        <field name="is_driver"/>
+                    </group>
+                    <group>
+                    </group>
+                </group>
+            </xpath>
+
+            <div name="button_box" position="inside">
+                <button name="view_acs_ambulance_drive" type="object" class="oe_stat_button" groups="acs_hms_ambulance.group_ambulance_service_user" icon="fa-ambulance">
+                    <field string="Ambulance Drives" name="acs_ambulance_drive_count" widget="statinfo"/>
+                </button>
+            </div>
+
+        </field>
+    </record>
+
+    <record id="view_res_partner_filter" model="ir.ui.view">
+        <field name="name">res.partner.filter</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_res_partner_filter"/>
+        <field name="arch" type="xml">
+            <filter name="customer" position="before">
+                <filter string="Is Driver" name="is_driver" domain="[('is_driver','=',True)]"/>
+            </filter>
+        </field>
+    </record>
+
+    <record id="action_partner_driver" model="ir.actions.act_window">
+        <field name="name">Ambulance Driver</field>
+        <field name="res_model">res.partner</field>
+        <field name="context">{'search_default_is_driver': 1, 'default_is_driver': 1}</field>
+        <field name="view_mode">kanban,tree,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No Record Found
+            </p>
+            <p>
+                Click to add a Driver.
+            </p>
+        </field>
+    </record>
+
+</odoo>
+```
+
+  File: views/menu_items.xml
+  Content:
+```
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+
+    <!-- Main Menu -->
+    <menuitem id="menu_acs_ambulance_root" name="Ambulance" sequence="70" groups="acs_hms_ambulance.group_ambulance_service_user" web_icon="acs_hms_ambulance,static/description/icon.png"/>
+
+    <menuitem id="menu_acs_ambulance_service" groups="acs_hms_ambulance.group_ambulance_service_user" name="Ambulance Service" sequence="10" parent="menu_acs_ambulance_root" action="action_acs_ambulance_service"/>
+
+    <menuitem id="menu_acs_ambulance_configuration" name="Configuration" sequence="100" parent="menu_acs_ambulance_root" groups="acs_hms_base.group_hms_manager"/>
+
+    <menuitem id="menu_acs_ambulance_vehicles" name="Vehicles" sequence="10" parent="menu_acs_ambulance_configuration" action="fleet.fleet_vehicle_action"/>
+
+    <menuitem id="menu_acs_ambulance_driver" name="Drivers" sequence="20" parent="menu_acs_ambulance_configuration" action="action_partner_driver"/>
+
+</odoo>
+```
+
+  File: views/res_config_view.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="res_config_settings_view_form" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.ambulance</field>
+        <field name="model">res.config.settings</field>
+        <field name="priority" eval="10"/>
+        <field name="inherit_id" ref="acs_hms.res_config_settings_view_form" />
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='hospitalization']" position="after">
+                <block title="Ambulance" name="ambulance_setting_container">
+                    <setting help="Allow user to create Invoices for Ambulance Service" id="acs_ambulance_invoicing_setting">
+                        <field name="acs_ambulance_invoicing" class="o_light_label"/>
+                    </setting>
+                    <setting help="Set this service as default service for Ambulance Service Invoice." id="acs_ambulance_invoicing_product_setting">
+                        <field name="acs_ambulance_invoicing_product_id" class="o_light_label" string="Ambulance Service Product"/>
+                    </setting>
+                </block>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>
+
+```
+
+Security:
+  File: security/hms_security.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="group_ambulance_service_user" model="res.groups">
+        <field name="name">Ambulance Service</field>
+        <field name="category_id" ref="acs_hms_base.module_category_hms_department"/>
+        <field name="implied_ids" eval="[(4, ref('base.group_user')),(4, ref('acs_hms_base.group_hms_user'))]"/>
+        <field name="users" eval="[(4, ref('base.user_root')), (4, ref('base.user_admin'))]"/>
+    </record>
+
+    <record id="acs_hms_base.group_hms_manager" model="res.groups">
+        <field name="implied_ids" eval="[(4, ref('acs_hms_ambulance.group_ambulance_service_user'))]"/>
+    </record>
+
+    <data noupdate="1">
+
+        <record model="ir.rule" id="acs_ambulance_service_rule">
+            <field name="name">Ambulance Service multi-company</field>
+            <field name="model_id" ref="model_acs_ambulance_service"/>
+            <field name="domain_force">['|',('company_id','=',False),('company_id', 'in', company_ids)]</field>
+        </record>
+
+        <!-- See Own Department Records -->
+        <record id="acs_ambulance_service_department_rule" model="ir.rule">
+            <field name="name">Ambulance Services: Departments</field>
+            <field name="model_id" ref="model_acs_ambulance_service"/>
+            <field name="domain_force">['|', ('department_id', '=', False), ('department_id', 'in', [dep.id for dep in user.department_ids])]</field>
+        </record>
+
+    </data>
+</odoo>
+
+
+```
+
+Data:
+  File: data/data.xml
+  Content:
+```
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+
+        <!-- Sequences for Ambulance Service -->
+        <record id="seq_acs_ambulance_service" model="ir.sequence">
+            <field name="name">Ambulance Service</field>
+            <field name="code">acs.ambulance.service</field>
+            <field name="prefix">AMB</field>
+            <field name="padding">3</field>
+            <field name="acs_auto_create" eval="True"/>
+            <field name="company_id" eval="False"/>
+        </record>
+
+    </data>
+</odoo>
+
+```
+
+I18n:
+  File: i18n/es.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_ambulance
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 13.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2020-02-21 05:29+0000\n"
+"PO-Revision-Date: 2020-06-26 03:23-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 2.3.1\n"
+"Last-Translator: \n"
+"Language: es\n"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_patient__acs_ambulance_drive_count
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_physician__acs_ambulance_drive_count
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_insurance_tpa__acs_ambulance_drive_count
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_partner__acs_ambulance_drive_count
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_users__acs_ambulance_drive_count
+msgid "#Ambulance Drives"
+msgstr "#Conductores de Ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_patient__acs_ambulance_service_count
+msgid "#Ambulance Services"
+msgstr "#Servicios de Ambulancia"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.res_config_settings_view_form
+msgid "<span class=\"o_form_label\">Ambulance Service Product</span>"
+msgstr "<span class=\"o_form_label\">Producto del servicio de ambulancia</span>"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_needaction
+msgid "Action Needed"
+msgstr "Acción Necesaria"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_ids
+msgid "Activities"
+msgstr "Actividades"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_exception_decoration
+msgid "Activity Exception Decoration"
+msgstr "Decoración de excepción de actividad"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_state
+msgid "Activity State"
+msgstr "Estado de la actividad"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_company__acs_ambulance_invoicing
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_config_settings__acs_ambulance_invoicing
+msgid "Allow Ambulance Invoicing"
+msgstr "Permitir facturación de ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__acs_ambulance_invoicing
+msgid "Allow Ambulance Service Invoicing"
+msgstr "Permitir la facturación del servicio de ambulancia"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.res_config_settings_view_form
+msgid "Allow user to create Invoices for Ambulance Service"
+msgstr "Permitir al usuario crear facturas para el servicio de ambulancias"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields.selection,name:acs_hms_ambulance.selection__product_template__hospital_product_type__ambulance
+#: model:ir.ui.menu,name:acs_hms_ambulance.menu_acs_ambulance_root
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.res_config_settings_view_form
+msgid "Ambulance"
+msgstr "Ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__service_product_id
+msgid "Ambulance Charge Service"
+msgstr "Cargos del servicio de ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.actions.act_window,name:acs_hms_ambulance.action_partner_driver
+msgid "Ambulance Driver"
+msgstr "Conductor de ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_patient__acs_ambulance_drive_ids
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_physician__acs_ambulance_drive_ids
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_insurance_tpa__acs_ambulance_drive_ids
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_partner__acs_ambulance_drive_ids
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_users__acs_ambulance_drive_ids
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.view_hms_partner_form
+msgid "Ambulance Drives"
+msgstr "Conductores de Ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_company__acs_ambulance_invoicing_product_id
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_config_settings__acs_ambulance_invoicing_product_id
+#: model:ir.model.fields,help:acs_hms_ambulance.field_res_company__acs_ambulance_invoicing_product_id
+#: model:ir.model.fields,help:acs_hms_ambulance.field_res_config_settings__acs_ambulance_invoicing_product_id
+msgid "Ambulance Invoicing Product"
+msgstr "Producto de facturación de ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.actions.act_window,name:acs_hms_ambulance.action_acs_ambulance_service
+#: model:ir.model,name:acs_hms_ambulance.model_acs_ambulance_service
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__service_product_id
+#: model:ir.ui.menu,name:acs_hms_ambulance.menu_acs_ambulance_service
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_calendar
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_pivot
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_tree
+#: model:res.groups,name:acs_hms_ambulance.group_ambulance_service_user
+msgid "Ambulance Service"
+msgstr "Servicio de ambulancias"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.res_config_settings_view_form
+msgid "Ambulance Service Invoicing"
+msgstr "Facturación del servicio de ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_patient__acs_ambulance_service_ids
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.view_hms_partner_form
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.view_patient_form
+msgid "Ambulance Services"
+msgstr "Servicios de ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__vehicle_id
+msgid "Ambulance Vehicle"
+msgstr "Vehículo ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_attachment_count
+msgid "Attachment Count"
+msgstr "Conteo de archivos adjuntos"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields.selection,name:acs_hms_ambulance.selection__acs_ambulance_service__state__cancel
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "Cancel"
+msgstr "Anular"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.actions.act_window,help:acs_hms_ambulance.action_acs_ambulance_service
+msgid "Click to add a Ambulance Service."
+msgstr "Haga clic para agregar un servicio de ambulancia."
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.actions.act_window,help:acs_hms_ambulance.action_partner_driver
+msgid "Click to add a Driver."
+msgstr "Haga clic para agregar un chofer."
+
+#. module: acs_hms_ambulance
+#: model:ir.model,name:acs_hms_ambulance.model_res_config_settings
+msgid "Config Settings"
+msgstr "Ajustes"
+
+#. module: acs_hms_ambulance
+#: model:ir.ui.menu,name:acs_hms_ambulance.menu_acs_ambulance_configuration
+msgid "Configuration"
+msgstr "Configuración"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields.selection,name:acs_hms_ambulance.selection__acs_ambulance_service__state__confirm
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "Confirm"
+msgstr "Confirmar"
+
+#. module: acs_hms_ambulance
+#: model:ir.model,name:acs_hms_ambulance.model_res_partner
+msgid "Contact"
+msgstr "Contacto"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "Create Invoice"
+msgstr "Crear Factura"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__create_uid
+msgid "Created by"
+msgstr "Creado por"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__create_date
+msgid "Created on"
+msgstr "Creado el"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__date
+msgid "Date"
+msgstr "Fecha"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__display_name
+msgid "Display Name"
+msgstr "Nombre mostrado"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields.selection,name:acs_hms_ambulance.selection__acs_ambulance_service__state__done
+msgid "Donated"
+msgstr "Donado"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "Done"
+msgstr "Listo"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields.selection,name:acs_hms_ambulance.selection__acs_ambulance_service__state__draft
+msgid "Draft"
+msgstr "Borrador"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__driver_id
+msgid "Driver"
+msgstr "Conductor"
+
+#. module: acs_hms_ambulance
+#: model:ir.ui.menu,name:acs_hms_ambulance.menu_acs_ambulance_driver
+msgid "Drivers"
+msgstr "Conductores"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__drop_location
+msgid "Drop Location"
+msgstr "Ubicación de entrega"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_follower_ids
+msgid "Followers"
+msgstr "Seguidores"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_channel_ids
+msgid "Followers (Channels)"
+msgstr "Seguidores (Canales)"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_partner_ids
+msgid "Followers (Partners)"
+msgstr "Seguidores (Clientes)"
+
+#. module: acs_hms_ambulance
+#: model:ir.model,name:acs_hms_ambulance.model_res_company
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__company_id
+msgid "Hospital"
+msgstr "Centro de salud"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_product_product__hospital_product_type
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_product_template__hospital_product_type
+msgid "Hospital Product Type"
+msgstr "Tipo de producto"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__id
+msgid "ID"
+msgstr "ID"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_exception_icon
+msgid "Icon"
+msgstr "Icono"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__activity_exception_icon
+msgid "Icon to indicate an exception activity."
+msgstr "Icono para indicar actividad de excepción."
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__message_needaction
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__message_unread
+msgid "If checked, new messages require your attention."
+msgstr "Si está marcado, hay nuevos mensajes que requieren su atención."
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__message_has_error
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__message_has_sms_error
+msgid "If checked, some messages have a delivery error."
+msgstr "Si se encuentra marcado, algunos mensajes tienen error de envío."
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__invoice_id
+msgid "Invoice"
+msgstr "Factura"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_patient__is_driver
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_physician__is_driver
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_insurance_tpa__is_driver
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_partner__is_driver
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_users__is_driver
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.view_res_partner_filter
+msgid "Is Driver"
+msgstr "Es conductor"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_is_follower
+msgid "Is Follower"
+msgstr "Es un seguidor"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service____last_update
+msgid "Last Modified on"
+msgstr "Última modificación en"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__write_uid
+msgid "Last Updated by"
+msgstr "Última actualización por"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__write_date
+msgid "Last Updated on"
+msgstr "Última actualización el"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_main_attachment_id
+msgid "Main Attachment"
+msgstr "Adjuntos principales"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_has_error
+msgid "Message Delivery error"
+msgstr "Error de Envío de Mensaje"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_ids
+msgid "Messages"
+msgstr "Mensajes"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__name
+msgid "Name"
+msgstr "Nombre"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_date_deadline
+msgid "Next Activity Deadline"
+msgstr "Fecha límite de siguiente actividad"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_summary
+msgid "Next Activity Summary"
+msgstr "Resumen de la siguiente actividad"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_type_id
+msgid "Next Activity Type"
+msgstr "Siguiente tipo de actividad"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.actions.act_window,help:acs_hms_ambulance.action_partner_driver
+msgid "No Record Found"
+msgstr "Registro no encontrado"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "Notes..."
+msgstr "Estas notas las verá el paciente si tiene portal de usuario…"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_needaction_counter
+msgid "Number of Actions"
+msgstr "Número de acciones"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_has_error_counter
+msgid "Number of errors"
+msgstr "Cantidad de errores"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__message_needaction_counter
+msgid "Number of messages which requires an action"
+msgstr "Número de mensajes que requieren una acción"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__message_has_error_counter
+msgid "Number of messages with delivery error"
+msgstr "Número de mensajes con error de envío"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__message_unread_counter
+msgid "Number of unread messages"
+msgstr "Número de mensajes no leidos"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__odometer_start
+msgid "Odometer Start"
+msgstr "Inicio odómetro"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__odometer_stop
+#, fuzzy
+msgid "Odometer Stop"
+msgstr "Parada del odómetro"
+
+#. module: acs_hms_ambulance
+#: model:ir.model,name:acs_hms_ambulance.model_hms_patient
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__patient_id
+msgid "Patient"
+msgstr "Paciente"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__pick_location
+msgid "Pick Location"
+msgstr "Ubicación de Recogida"
+
+#. module: acs_hms_ambulance
+#: code:addons/acs_hms_ambulance/models/ambulance_service.py:0
+#, python-format
+msgid "Please Set Service Product first for Ambulance Service in Configuration."
+msgstr "Establezca el producto de servicio primero para el servicio de ambulancia en la configuración."
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__price
+msgid "Price"
+msgstr "Precio"
+
+#. module: acs_hms_ambulance
+#: model:ir.model,name:acs_hms_ambulance.model_product_template
+msgid "Product Template"
+msgstr "Plantilla de producto"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__remark
+msgid "Remark"
+msgstr "Observación"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__user_id
+msgid "Responsible"
+msgstr "Responsable"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__driver_id
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__user_id
+msgid "Responsible Person"
+msgstr "Persona Responsable"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_user_id
+msgid "Responsible User"
+msgstr "Usuario responsable"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_has_sms_error
+msgid "SMS Delivery error"
+msgstr "Error de entrega de SMS"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "Service Charge"
+msgstr "Cargo por servicio"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.res_config_settings_view_form
+msgid "Set this service as default service for Ambulance Service Invoice."
+msgstr "Establezca este servicio como servicio predeterminado para Factura de servicio de ambulancia."
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__state
+msgid "State"
+msgstr "Estado"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__activity_state
+msgid ""
+"Status based on activities\n"
+"Overdue: Due date is already passed\n"
+"Today: Activity date is today\n"
+"Planned: Future activities."
+msgstr ""
+"Estado basado en actividades\n"
+"Vencido: la fecha tope ya ha pasado\n"
+"Hoy: La fecha tope es hoy\n"
+"Planificado: futuras actividades."
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields.selection,name:acs_hms_ambulance.selection__acs_ambulance_service__state__to_invoice
+msgid "To Invoice"
+msgstr "Para facturar"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__activity_exception_decoration
+msgid "Type of the exception activity on record."
+msgstr "Tipo de actividad de excepción registrada."
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_unread
+msgid "Unread Messages"
+msgstr "Mensajes por leer"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_unread_counter
+msgid "Unread Messages Counter"
+msgstr "Contador de mensajes sin leer"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__vehicle_id
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "Vehicle"
+msgstr "Vehículo"
+
+#. module: acs_hms_ambulance
+#: model:ir.ui.menu,name:acs_hms_ambulance.menu_acs_ambulance_vehicles
+msgid "Vehicles"
+msgstr "Vehículos"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "View Invoice"
+msgstr "Ver factura"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__website_message_ids
+msgid "Website Messages"
+msgstr "Mensajes del sitio web"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__website_message_ids
+msgid "Website communication history"
+msgstr "Historial de comunicaciones del sitio web"
+
+```
+
+  File: i18n/es_PA.po
+  Content:
+```
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* acs_hms_ambulance
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 13.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2020-02-21 05:29+0000\n"
+"PO-Revision-Date: 2020-07-26 17:02-0500\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 2.3.1\n"
+"Last-Translator: \n"
+"Language: es_PA\n"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_patient__acs_ambulance_drive_count
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_physician__acs_ambulance_drive_count
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_insurance_tpa__acs_ambulance_drive_count
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_partner__acs_ambulance_drive_count
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_users__acs_ambulance_drive_count
+msgid "#Ambulance Drives"
+msgstr "#Conductores de Ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_patient__acs_ambulance_service_count
+msgid "#Ambulance Services"
+msgstr "#Servicios de Ambulancia"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.res_config_settings_view_form
+msgid "<span class=\"o_form_label\">Ambulance Service Product</span>"
+msgstr "<span class=\"o_form_label\">Producto del servicio de ambulancia</span>"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_needaction
+msgid "Action Needed"
+msgstr "Acción Necesaria"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_ids
+msgid "Activities"
+msgstr "Actividades"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_exception_decoration
+msgid "Activity Exception Decoration"
+msgstr "Decoración de excepción de actividad"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_state
+msgid "Activity State"
+msgstr "Estado de la actividad"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_company__acs_ambulance_invoicing
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_config_settings__acs_ambulance_invoicing
+msgid "Allow Ambulance Invoicing"
+msgstr "Permitir facturación de ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__acs_ambulance_invoicing
+msgid "Allow Ambulance Service Invoicing"
+msgstr "Permitir la facturación del servicio de ambulancia"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.res_config_settings_view_form
+msgid "Allow user to create Invoices for Ambulance Service"
+msgstr "Permitir al usuario crear facturas para el servicio de ambulancias"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields.selection,name:acs_hms_ambulance.selection__product_template__hospital_product_type__ambulance
+#: model:ir.ui.menu,name:acs_hms_ambulance.menu_acs_ambulance_root
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.res_config_settings_view_form
+msgid "Ambulance"
+msgstr "Ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__service_product_id
+msgid "Ambulance Charge Service"
+msgstr "Cargos del servicio de ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.actions.act_window,name:acs_hms_ambulance.action_partner_driver
+msgid "Ambulance Driver"
+msgstr "Conductor de ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_patient__acs_ambulance_drive_ids
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_physician__acs_ambulance_drive_ids
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_insurance_tpa__acs_ambulance_drive_ids
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_partner__acs_ambulance_drive_ids
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_users__acs_ambulance_drive_ids
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.view_hms_partner_form
+msgid "Ambulance Drives"
+msgstr "Conductores de Ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_company__acs_ambulance_invoicing_product_id
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_config_settings__acs_ambulance_invoicing_product_id
+#: model:ir.model.fields,help:acs_hms_ambulance.field_res_company__acs_ambulance_invoicing_product_id
+#: model:ir.model.fields,help:acs_hms_ambulance.field_res_config_settings__acs_ambulance_invoicing_product_id
+msgid "Ambulance Invoicing Product"
+msgstr "Producto de facturación de ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.actions.act_window,name:acs_hms_ambulance.action_acs_ambulance_service
+#: model:ir.model,name:acs_hms_ambulance.model_acs_ambulance_service
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__service_product_id
+#: model:ir.ui.menu,name:acs_hms_ambulance.menu_acs_ambulance_service
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_calendar
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_pivot
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_tree
+#: model:res.groups,name:acs_hms_ambulance.group_ambulance_service_user
+msgid "Ambulance Service"
+msgstr "Servicio de ambulancias"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.res_config_settings_view_form
+msgid "Ambulance Service Invoicing"
+msgstr "Facturación del servicio de ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_patient__acs_ambulance_service_ids
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.view_hms_partner_form
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.view_patient_form
+msgid "Ambulance Services"
+msgstr "Servicios de ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__vehicle_id
+msgid "Ambulance Vehicle"
+msgstr "Vehículo ambulancia"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_attachment_count
+msgid "Attachment Count"
+msgstr "Conteo de archivos adjuntos"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields.selection,name:acs_hms_ambulance.selection__acs_ambulance_service__state__cancel
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "Cancel"
+msgstr "Anular"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.actions.act_window,help:acs_hms_ambulance.action_acs_ambulance_service
+msgid "Click to add a Ambulance Service."
+msgstr "Haga clic para agregar un servicio de ambulancia."
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.actions.act_window,help:acs_hms_ambulance.action_partner_driver
+msgid "Click to add a Driver."
+msgstr "Haga clic para agregar un chofer."
+
+#. module: acs_hms_ambulance
+#: model:ir.model,name:acs_hms_ambulance.model_res_config_settings
+msgid "Config Settings"
+msgstr "Ajustes"
+
+#. module: acs_hms_ambulance
+#: model:ir.ui.menu,name:acs_hms_ambulance.menu_acs_ambulance_configuration
+msgid "Configuration"
+msgstr "Configuración"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields.selection,name:acs_hms_ambulance.selection__acs_ambulance_service__state__confirm
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "Confirm"
+msgstr "Confirmar"
+
+#. module: acs_hms_ambulance
+#: model:ir.model,name:acs_hms_ambulance.model_res_partner
+msgid "Contact"
+msgstr "Contacto"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "Create Invoice"
+msgstr "Crear Factura"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__create_uid
+msgid "Created by"
+msgstr "Creado por"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__create_date
+msgid "Created on"
+msgstr "Creado el"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__date
+msgid "Date"
+msgstr "Fecha"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__display_name
+msgid "Display Name"
+msgstr "Nombre mostrado"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields.selection,name:acs_hms_ambulance.selection__acs_ambulance_service__state__done
+msgid "Donated"
+msgstr "Donado"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "Done"
+msgstr "Listo"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields.selection,name:acs_hms_ambulance.selection__acs_ambulance_service__state__draft
+msgid "Draft"
+msgstr "Borrador"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__driver_id
+msgid "Driver"
+msgstr "Conductor"
+
+#. module: acs_hms_ambulance
+#: model:ir.ui.menu,name:acs_hms_ambulance.menu_acs_ambulance_driver
+msgid "Drivers"
+msgstr "Conductores"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__drop_location
+msgid "Drop Location"
+msgstr "Ubicación de entrega"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_follower_ids
+msgid "Followers"
+msgstr "Seguidores"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_channel_ids
+msgid "Followers (Channels)"
+msgstr "Seguidores (Canales)"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_partner_ids
+msgid "Followers (Partners)"
+msgstr "Seguidores (Clientes)"
+
+#. module: acs_hms_ambulance
+#: model:ir.model,name:acs_hms_ambulance.model_res_company
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__company_id
+msgid "Hospital"
+msgstr "Centro de salud"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_product_product__hospital_product_type
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_product_template__hospital_product_type
+msgid "Hospital Product Type"
+msgstr "Tipo de producto del hospital"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__id
+msgid "ID"
+msgstr "ID"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_exception_icon
+msgid "Icon"
+msgstr "Icono"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__activity_exception_icon
+msgid "Icon to indicate an exception activity."
+msgstr "Icono para indicar una actividad de excepción."
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__message_needaction
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__message_unread
+msgid "If checked, new messages require your attention."
+msgstr "Si está marcado, hay nuevos mensajes que requieren su atención."
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__message_has_error
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__message_has_sms_error
+msgid "If checked, some messages have a delivery error."
+msgstr "Si se encuentra marcado, algunos mensajes tienen error de envío."
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__invoice_id
+msgid "Invoice"
+msgstr "Factura"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_patient__is_driver
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_hms_physician__is_driver
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_insurance_tpa__is_driver
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_partner__is_driver
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_res_users__is_driver
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.view_res_partner_filter
+msgid "Is Driver"
+msgstr "Es conductor"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_is_follower
+msgid "Is Follower"
+msgstr "Es un seguidor"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service____last_update
+msgid "Last Modified on"
+msgstr "Última modificación en"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__write_uid
+msgid "Last Updated by"
+msgstr "Última actualización por"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__write_date
+msgid "Last Updated on"
+msgstr "Última actualización el"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_main_attachment_id
+msgid "Main Attachment"
+msgstr "Adjuntos principales"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_has_error
+msgid "Message Delivery error"
+msgstr "Error de Envío de Mensaje"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_ids
+msgid "Messages"
+msgstr "Mensajes"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__name
+msgid "Name"
+msgstr "Nombre"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_date_deadline
+msgid "Next Activity Deadline"
+msgstr "Fecha límite de siguiente actividad"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_summary
+msgid "Next Activity Summary"
+msgstr "Resumen de la siguiente actividad"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_type_id
+msgid "Next Activity Type"
+msgstr "Siguiente tipo de actividad"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.actions.act_window,help:acs_hms_ambulance.action_partner_driver
+msgid "No Record Found"
+msgstr "Registro no encontrado"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "Notes..."
+msgstr "Notas…"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_needaction_counter
+msgid "Number of Actions"
+msgstr "Número de acciones"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_has_error_counter
+msgid "Number of errors"
+msgstr "Número de errores"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__message_needaction_counter
+msgid "Number of messages which requires an action"
+msgstr "Número de mensajes que requieren una acción"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__message_has_error_counter
+msgid "Number of messages with delivery error"
+msgstr "Número de mensajes con error de envío"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__message_unread_counter
+msgid "Number of unread messages"
+msgstr "Número de mensajes no leidos"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__odometer_start
+msgid "Odometer Start"
+msgstr "Inicio del odómetro"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__odometer_stop
+msgid "Odometer Stop"
+msgstr "Parada del odómetro"
+
+#. module: acs_hms_ambulance
+#: model:ir.model,name:acs_hms_ambulance.model_hms_patient
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__patient_id
+msgid "Patient"
+msgstr "Paciente"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__pick_location
+msgid "Pick Location"
+msgstr "Ubicación de Recogida"
+
+#. module: acs_hms_ambulance
+#: code:addons/acs_hms_ambulance/models/ambulance_service.py:0
+#, python-format
+msgid "Please Set Service Product first for Ambulance Service in Configuration."
+msgstr "Establezca el producto de servicio primero para el servicio de ambulancia en la configuración."
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__price
+msgid "Price"
+msgstr "Precio"
+
+#. module: acs_hms_ambulance
+#: model:ir.model,name:acs_hms_ambulance.model_product_template
+msgid "Product Template"
+msgstr "Plantilla de producto"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__remark
+msgid "Remark"
+msgstr "Observación"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__user_id
+msgid "Responsible"
+msgstr "Responsable"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__driver_id
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__user_id
+msgid "Responsible Person"
+msgstr "Persona Responsable"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__activity_user_id
+msgid "Responsible User"
+msgstr "Usuario responsable"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_has_sms_error
+msgid "SMS Delivery error"
+msgstr "Error de entrega de SMS"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "Service Charge"
+msgstr "Cargo por servicio"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.res_config_settings_view_form
+msgid "Set this service as default service for Ambulance Service Invoice."
+msgstr "Establezca este servicio como servicio predeterminado para Factura de servicio de ambulancia."
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__state
+msgid "State"
+msgstr "Estado"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__activity_state
+msgid ""
+"Status based on activities\n"
+"Overdue: Due date is already passed\n"
+"Today: Activity date is today\n"
+"Planned: Future activities."
+msgstr ""
+"Estado basado en actividades\n"
+"Vencido: la fecha tope ya ha pasado\n"
+"Hoy: La fecha tope es hoy\n"
+"Planificado: futuras actividades."
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields.selection,name:acs_hms_ambulance.selection__acs_ambulance_service__state__to_invoice
+msgid "To Invoice"
+msgstr "Para facturar"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__activity_exception_decoration
+msgid "Type of the exception activity on record."
+msgstr "Tipo de actividad de excepción registrada."
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_unread
+msgid "Unread Messages"
+msgstr "Mensajes por leer"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__message_unread_counter
+msgid "Unread Messages Counter"
+msgstr "Contador de mensajes sin leer"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__vehicle_id
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "Vehicle"
+msgstr "Vehículo"
+
+#. module: acs_hms_ambulance
+#: model:ir.ui.menu,name:acs_hms_ambulance.menu_acs_ambulance_vehicles
+msgid "Vehicles"
+msgstr "Vehículos"
+
+#. module: acs_hms_ambulance
+#: model_terms:ir.ui.view,arch_db:acs_hms_ambulance.acs_acs_ambulance_service_form
+msgid "View Invoice"
+msgstr "Ver factura"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,field_description:acs_hms_ambulance.field_acs_ambulance_service__website_message_ids
+msgid "Website Messages"
+msgstr "Mensajes del sitio web"
+
+#. module: acs_hms_ambulance
+#: model:ir.model.fields,help:acs_hms_ambulance.field_acs_ambulance_service__website_message_ids
+msgid "Website communication history"
+msgstr "Historial de comunicaciones del sitio web"
+
+```
+
+Static:
+  File: static/description/acs.png
+  Content:
+```
+Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte
+```
+
+  File: static/description/almightycs.png
+  Content:
+```
+Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte
+```
+
+  File: static/description/icon.png
+  Content:
+```
+Error reading file: 'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte
+```
+
+  File: static/description/index.html
+  Content:
+```
+<head>
+  <style>
+      .backgrounds{background-color:#fff; color:#0B80E6}
+  </style>
+</head>
+
+<section class="oe_container">
+    <div class="mt32 mb32">
+        <div style="background-color: #2d9f9d; background-image: linear-gradient(#918c8c, #2d9f9d); background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%); border-radius: 10px 10px 10px 10px; min-height: 160px;">
+            <div class="text-white font-weight-bold" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                <div class="pt-2 text-center">
+                    <span>
+                    <span class="pt-2 text-center" style="font-size:27px;">Almighty Consulting Solutions Pvt. Ltd.</span><br/>
+                </div>
+                <div class="row mt16">
+                    <div class="col-4 text-center">
+                        <span>Supported Editions</span><br/> 
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Community 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Enterprise 
+                        </span>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <a href="https://www.almightycs.com" target="_blank">
+                            <img src="almightycs.png" width="80" height="auto">
+                        </a>
+                    </div>
+
+                    <div class="col-4 text-center">
+                        <span>Supported Hostings <br/></span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Odoo.sh 
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>Cloud
+                        </span>
+                        <span class="badge badge-pill badge-light" style="background: linear-gradient(106deg,#f9f6f6 0%,#8c8d8d 100%); border-radius: 0.4rem; padding: 1.00em 0.4em; padding-right: 2em; padding-left: 2em;"> 
+                                <i class="fa fa-check-circle position-absolute" style="font-size:16px; margin-left:-17px; margin-top:-2px"></i>On Premise 
+                        </span><br/>
+                        <span class="pt-2 text-center" style="font-size:12px;">App can not be used on odoo online.</span><br/>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+ 
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12 oe_mt32 mb32">
+            <h3 class="oe_slogan">Hospital Ambulance Management System By AlmightyCS</h3><h4>Manage Ambulance booking, Trips and invoicing and related flows in hospital.<br/></h4>
+        </div>
+    </div> 
+</section>
+
+<section class="oe_container">
+    <div class='text-center mt92'>
+        <h2> Detailed Description of Module</h2>
+    </div>
+    <div class="panel-body">
+        <div class="alert alert-info">
+            <h3>
+                <a data-toggle="collapse" href="#acs_ambulance"><i class="fa fa-plus-circle"></i></a>
+                <b> Hospital Ambulance Management </b>
+                <b style="float:right"><a href="http://www.almightycs.com" target="_blank">By ACS </b></a>
+            </h3>
+
+            <h4><i class="fa fa-hand-o-right text-success"></i> Manage Ambulance Details</h4>
+            <h4><i class="fa fa-hand-o-right text-success"></i> Manage Ambulance Trips &mp; Related Invoicing (Configurable).</h4>
+            <h4><i class="fa fa-hand-o-right text-success"></i> Manage Fleet Details.</h4>
+            <h4><i class="fa fa-hand-o-right text-success"></i> This module is Generic so it can be extended further in custom modules also.</h4>
+        </div>
+        <div id="acs_ambulance" class="panel-collapse collapse in" class="oe_span12">
+
+        </div>
+        <br/>
+        <br/>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <h4 class="oe_slogan"><a href="http://www.almightycs.com">Almighty Consulting Solutions Pvt. Ltd.</a> </h4>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span12">
+            <h3 class="oe_slogan">Other Configuration</h3>
+            <p class="oe_slogan">To use this module no technical knowledge is required. Just install module and functionality is ready to use. For more customization and help contact us.</p>
+        </div>
+    </div>
+</section>
+
+<section class="oe_container">
+    <div class="oe_row oe_spaced">
+        <div class="oe_span6">
+            <div class="oe_demo o_picture o_screenshot">
+                <a href="https://www.almightycs.com" target="_blank">
+                    <img src="acs.png" width="200" height="auto">
+                </a>
+                <div class="oe_demo_footer oe_centeralign">Meet Us</div>
+            </div>
+        </div>
+        <div class="oe_span6">
+            <br/><br/>
+            <h2 class="oe_slogan">Do you need help?</h2>
+            <h3 class="oe_slogan">
+                Let's offer you the best services!
+            </h3>
+            <p class="oe_mt32 text-center">
+                Contact us by our official channels.
+            </p>
+            <p class="oe_mt32 text-center">
+                Skype: turkesh4friends 
+            </p>
+            <div class="oe_spaced">
+                <ul class="text-center list-inline">
+                    <li>
+                        <a href="https://www.linkedin.com/organization-guest/company/almighty-consulting-services" Target="_blank"><i class="fa fa-linkedin-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://www.facebook.com/AlmightyCS.ERP" Target="_blank"><i class="fa fa-facebook-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://github.com/tpa-odoo" Target="_blank"><i class="fa fa-github-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="mailto:info@almightycs.com" Target="_blank"><i class="fa fa-envelope-square fa-xs backgrounds"></i></a>
+                    </li>
+                    <li>
+                        <a href="https://twitter.com/_AlmightyCS" Target="_blank" ><i class="fa fa-twitter-square fa-xs backgrounds"></i></a>
+                    </li>
+
+                    <li>
+                        <a title="Contact us" data-toggle="tooltip" data-placement="left" Target="_blank" href="https://www.almightycs.com/contactus"><i class="fa fa-globe fa-xs backgrounds"></i></a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+<section class="oe_container">
+
+    <div data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: fixed;
+            bottom: 10px;
+            right: 20px;
+            z-index: 1000;
+            box-shadow: 1px 2px 11px rgba(0, 0, 0, 0.3), -5px 7px 12px rgba(0, 0, 0, 0.22);
+            cursor: pointer;">
+        <span class="fa fa-2x fa-handshake-o"></span>
+    </div>
+    
+    <div class="collapse show" id="contactus-floating" style="z-index: 1006; position: fixed; bottom: 10px; right: 20px;">
+        <div style="width:246px; overflow: hidden;">
+            <div class="text-center acs-contactus-close" data-toggle="collapse" href="#contactus-floating" role="button" aria-expanded="true" aria-controls="contactus-floating" style="
+                    width: 25px;
+                    height: 25px;
+                    margin-bottom: -25px;
+                    display: flex;
+                    color: white;
+                    align-items: center;
+                    justify-content: center;
+                    position: relative;
+                    z-index: 1000;
+                    cursor: pointer;">
+                <i class="fa fa-times"></i>
+            </div>
+            <div class="acs-contactus-data" style="
+                    margin-top: -17px;
+                    background: linear-gradient(106deg,#918c8c 0%,#2d9f9d 100%);
+                    border-radius: 10px 10px 10px 10px;
+                    padding-bottom: 10px;
+                    height: 106px;">
+                <div class="text-center" style="text-decoration: none; font-size: 14px; padding-top: 10px;">
+                    <span class="pt-2 text-white font-weight-bold" style="">Contact AlmightyCS</span>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; font-size: 14px;">  
+                    <a href="skype:turkesh4friends" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-skype" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Skype</span>
+                    </a>
+                    <a href="https://www.almightycs.com" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-globe fa-spin" style="font-size: 22px;"></i>
+                        <span class="pt-2 font-weight-bold">Website</span>
+                    </a>
+                </div>
+                <div class="acs-contactus-block" style="padding: 10px; 
+                    font-size: 14px; 
+                    padding-bottom: 20px; 
+                    padding-top: 22px;"> 
+                    <a href="mailto:info@almightycs.com" target="_blank" class="oe_span5 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-envelope" style="font-size: 19px;"></i>
+                        <span class="pt-2 font-weight-bold">Email</span>
+                    </a>
+                    <a href="https://www.almightycs.com/contactus" target="_blank" class="oe_span7 flex-column align-items-center text-white font-weight-light">
+                        <i class="fa fa-handshake-o" style="font-size: 20px;"></i>
+                        <span class="pt-2 font-weight-bold">Contactus</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div> 
+
+</section>
+
+```
+
+Doc:
+  File: doc/changelog.rst
+  Content:
+```
+`1.0.1                                                        [07/10/2023]`
+***************************************************************************
+- Migrated Module for v17
+```
+
