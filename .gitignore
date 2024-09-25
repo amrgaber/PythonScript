@@ -1,3 +1,6 @@
 *.pyc
 secret.txt
 *.tmp
+# Environment variables
+.env
+**/.env

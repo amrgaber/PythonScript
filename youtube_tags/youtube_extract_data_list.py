@@ -1,3 +1,4 @@
+import json
 import os
 import pandas as pd
 from pytube import Playlist, YouTube
@@ -7,12 +8,13 @@ from dotenv import load_dotenv
 import logging
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Load environment variables
 load_dotenv()
-# API_KEY = os.getenv('YOUTUBE_API_KEY')
-API_KEY = 'AIzaSyD-SoRotQunj8x3T48xf0ZOEHAHTouEkYM'
+API_KEY = os.getenv('YOUTUBE_API_KEY')
+
 
 def adjust_excel_formatting(writer, sheet_name):
     # Get the xlsxwriter workbook and worksheet objects
@@ -26,13 +28,16 @@ def adjust_excel_formatting(writer, sheet_name):
     for row in range(100):  # Adjust the range as needed
         worksheet.set_row(row, 15)
 
+
 def build_youtube_service():
     return build('youtube', 'v3', developerKey=API_KEY)
+
 
 def get_video_description(youtube, video_id):
     request = youtube.videos().list(part="snippet", id=video_id)
     response = request.execute()
     return response['items'][0]['snippet']['description']
+
 
 def get_playlist_info(youtube, playlist_id, playlist_url):
     request = youtube.playlists().list(part="snippet", id=playlist_id)
@@ -50,16 +55,21 @@ def get_playlist_info(youtube, playlist_id, playlist_url):
         'Series URL': playlist_url
     }
 
+
 def get_playlists(youtube, username):
-    request = youtube.search().list(part="snippet", type="channel", q=username, maxResults=1)
+    request = youtube.search().list(
+        part="snippet", type="channel", q=username, maxResults=1)
     response = request.execute()
     if not response['items']:
         return []
     channel_id = response['items'][0]['id']['channelId']
-    request = youtube.playlists().list(part="snippet", channelId=channel_id, maxResults=50)
+    request = youtube.playlists().list(
+        part="snippet", channelId=channel_id, maxResults=50)
     response = request.execute()
-    playlist_urls = [f"https://www.youtube.com/playlist?list={item['id']}" for item in response['items']]
+    playlist_urls = [
+        f"https://www.youtube.com/playlist?list={item['id']}" for item in response['items']]
     return playlist_urls
+
 
 def main():
     logging.info('Starting script...')
@@ -69,7 +79,7 @@ def main():
     channel_lst = ['Odoo Mates']
     # channel_lst_done = ['MuhammadNasserOfficial', 'Odoo Discussions','AJScript Media']
     all_data = []  # List to store data from all channels
-    series_info ={}
+    series_info = {}
     max_tags = 0
     # Initialize an empty dictionary to store the series tags
     series_tags = {}
@@ -83,7 +93,7 @@ def main():
             playlist = Playlist(playlist_url)
             video_urls = playlist.video_urls
             playlist_id = playlist_url.split('=')[-1]
-            series_info = get_playlist_info(youtube, playlist_id,playlist_url)
+            series_info = get_playlist_info(youtube, playlist_id, playlist_url)
             series_name = series_info['Series Title']  # Get the series name
             for url in video_urls:
                 video = YouTube(url)
@@ -94,7 +104,7 @@ def main():
                     tags = tags.split(', ')
 
                 all_data.append(list(series_info.values()) + [title, url, desc] + tags + [''] * (
-                            max_tags - len(tags)))  # Append data to all_data list
+                    max_tags - len(tags)))  # Append data to all_data list
                 max_tags = max(max_tags, len(tags))  # Update max_tags
 
                 # Add the tags to the set of unique tags for this series
@@ -112,7 +122,8 @@ def main():
     series_tags_df = series_tags_df.transpose()
 
     # Convert the set of channel tags into a DataFrame
-    channel_tags_df = pd.DataFrame(list(channel_tags), columns=['Channel Tags'])
+    channel_tags_df = pd.DataFrame(
+        list(channel_tags), columns=['Channel Tags'])
 
     column_names = list(series_info.keys()) + ['Video Title', 'Video Url', 'Video Desc'] + [f'Tag_{i}' for i in
                                                                                             range(max_tags)]
@@ -123,9 +134,11 @@ def main():
     with pd.ExcelWriter('AllChannels.xlsx', engine='xlsxwriter') as writer:
         df.to_excel(writer, sheet_name='All Channels', index=False)
         series_tags_df.to_excel(writer, sheet_name='Series Tags', index=False)
-        channel_tags_df.to_excel(writer, sheet_name='Channel Tags All', index=False)
+        channel_tags_df.to_excel(
+            writer, sheet_name='Channel Tags All', index=False)
 
     logging.info('Script finished.')
+
 
 if __name__ == "__main__":
     main()
